@@ -11,6 +11,7 @@ Opencode 工具包 - HTTP API 多轮会话模式
 import asyncio
 import subprocess
 import uuid
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional

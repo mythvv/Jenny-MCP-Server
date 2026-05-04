@@ -1,23 +1,27 @@
 # Jenny MCP Server
 
-> 通过 MCP 协议（Model Context Protocol）统一调度 AI 编码代理、数据分析和网页抓取的轻量工具服务器。
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Python ≥3.11](https://img.shields.io/badge/Python-%E2%89%A53.11-blue.svg)](https://www.python.org/)
+[![MCP Protocol](https://img.shields.io/badge/MCP-Protocol-green.svg)](https://modelcontextprotocol.io/)
 
-Jenny MCP Server 是一个基于 [FastMCP](https://github.com/modelcontextprotocol/python-sdk) 的工具服务器，为 AI 助手提供可动态切换的工具包。它将 Droid、OpenCode 等编码代理以及数据分析、网页抓取能力封装为标准 MCP 工具，任何支持 MCP 协议的客户端都可以直接调用。
+> A lightweight tool server that unifies AI coding agents, data analysis, and web scraping via the MCP (Model Context Protocol) protocol.
 
-## ✨ 特性
+Jenny MCP Server is a tool server built on [FastMCP](https://github.com/modelcontextprotocol/python-sdk) that provides dynamically switchable toolkits for AI assistants. It wraps coding agents like Droid and OpenCode, along with data analysis and web scraping capabilities, as standard MCP tools — any MCP-compatible client can call them directly.
 
-- 🔄 **动态工具包切换** — 运行时一键切换工具包，工具列表自动更新
-- 🤖 **多编码代理** — 支持 [Factory Droid](https://docs.factory.ai/)（文件管道）和 [OpenCode](https://opencode.ai/)（HTTP API）
-- 📊 **数据分析** — CSV 查询/统计/可视化、JSON 路径查询
-- 🌐 **网页抓取** — JS 渲染抓取、批量并发、增强搜索、浏览器登录
-- ⏱ **会话管理** — 自动 GC、空闲超时回收、孤儿会话清理
-- 📜 **Shell 脚本** — 附带 start/send/poll/status 脚本，可直接命令行交互
+## ✨ Features
 
-## 架构
+- 🔄 **Dynamic Toolkit Switching** — Switch toolkits at runtime; tool lists update automatically
+- 🤖 **Multiple Coding Agents** — Supports [Factory Droid](https://docs.factory.ai/) (file pipe) and [OpenCode](https://opencode.ai/) (HTTP API)
+- 📊 **Data Analysis** — CSV query/stats/visualization, JSON path queries
+- 🌐 **Web Scraping** — JS-rendered fetching, batch concurrency, enhanced search, browser login
+- ⏱ **Session Management** — Auto GC, idle timeout reclamation, orphan session cleanup
+- 📜 **Shell Scripts** — Bundled start/send/poll/status scripts for direct CLI interaction
+
+## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                  MCP Client (任意)                     │
+│                  MCP Client (any)                     │
 │          Claude / Jenny / Cursor / ...                │
 └──────────────────────┬───────────────────────────────┘
                        │ MCP (Streamable HTTP)
@@ -25,13 +29,13 @@ Jenny MCP Server 是一个基于 [FastMCP](https://github.com/modelcontextprotoc
 ┌──────────────────────▼───────────────────────────────┐
 │                  MCP Server (FastMCP)                  │
 │  ┌─────────────────────────────────────────────────┐  │
-│  │              通用工具 (始终可见)                   │  │
+│  │           Common Tools (always visible)          │  │
 │  │   toolkit_list / toolkit_switch / toolkit_current│  │
 │  └─────────────────────┬───────────────────────────┘  │
-│                        │ 动态切换                      │
+│                        │ Dynamic switching             │
 │  ┌─────────┬───────────┼───────────┬──────────────┐   │
 │  │  Droid  │ OpenCode  │DataAnalysis│ WebEnhanced │   │
-│  │(管道模式)│(HTTP API) │(CSV/JSON) │(JS渲染抓取)  │   │
+│  │ (pipe)  │(HTTP API) │(CSV/JSON) │(JS render)  │   │
 │  └────┬────┴─────┬─────┴─────┬─────┴──────┬──────┘   │
 └───────┼──────────┼───────────┼────────────┼───────────┘
         │          │           │            │
@@ -41,102 +45,102 @@ Jenny MCP Server 是一个基于 [FastMCP](https://github.com/modelcontextprotoc
    └────────┘ └────────┘ └────────┘ └──────────┘
 ```
 
-### 会话模型
+### Session Model
 
 ```
-                    Droid（文件管道模式）
+                    Droid (File Pipe Mode)
  ┌────────┐  input.jsonl   ┌──────────┐
  │ Client │ ──────────────►│  droid   │
  │        │  (JSON-RPC)    │  exec    │
  │        │◄────────────── │  (tail)  │
  └────────┘  output.jsonl  └──────────┘
 
-                    OpenCode（HTTP API 模式）
+                    OpenCode (HTTP API Mode)
  ┌────────┐   POST /session/{id}/message   ┌──────────┐
  │ Server │ ──────────────────────────────► │ opencode │
  │        │ ◄────────────────────────────── │  serve   │
- └────────┘   JSON response (同步等待)      └──────────┘
+ └────────┘   JSON response (sync wait)     └──────────┘
 ```
 
-## 目录结构
+## Directory Structure
 
 ```
 jenny-mcp-server/
 ├── config/
-│   └── defaults.example.json   # 配置模板
+│   └── defaults.example.json   # Configuration template
 ├── mcp-server/
-│   ├── server.py               # MCP 服务器主入口 + 工具路由注册
-│   ├── requirements.txt        # Python 依赖
+│   ├── server.py               # MCP server entry + tool routing
+│   ├── requirements.txt        # Python dependencies
 │   └── toolkits/
-│       ├── __init__.py         # 工具包导出
-│       ├── base.py             # 抽象基类 BaseToolkit
-│       ├── manager.py          # 工具包管理器 ToolkitManager
-│       ├── droid.py            # Droid 工具包
-│       ├── opencode.py         # OpenCode 工具包
-│       ├── data_analysis.py    # 数据分析工具包
-│       └── web_enhanced.py     # Web 增强工具包
+│       ├── __init__.py         # Toolkit exports
+│       ├── base.py             # Abstract base class BaseToolkit
+│       ├── manager.py          # Toolkit manager ToolkitManager
+│       ├── droid.py            # Droid toolkit
+│       ├── opencode.py         # OpenCode toolkit
+│       ├── data_analysis.py    # Data analysis toolkit
+│       └── web_enhanced.py     # Web enhanced toolkit
 ├── scripts/
-│   ├── start.sh                # 启动 Droid 会话
-│   ├── send.sh                 # 向会话发送消息
-│   ├── poll.sh                 # 轮询会话输出
-│   └── status.sh               # 查看会话状态
-├── sessions/                   # 会话数据（运行时生成）
-├── workspace/                  # 代理工作目录（运行时生成）
+│   ├── start.sh                # Start a Droid session
+│   ├── send.sh                 # Send message to session
+│   ├── poll.sh                 # Poll session output
+│   └── status.sh               # View session status
+├── sessions/                   # Session data (generated at runtime)
+├── workspace/                  # Agent workspace (generated at runtime)
 └── README.md
 ```
 
-## 安装
+## Installation
 
-### 前置要求
+### Prerequisites
 
 - Python 3.11+
-- [Factory Droid CLI](https://docs.factory.ai/)（仅 Droid 工具包需要）
-- [OpenCode](https://opencode.ai/)（仅 OpenCode 工具包需要）
+- [Factory Droid CLI](https://docs.factory.ai/) (only for Droid toolkit)
+- [OpenCode](https://opencode.ai/) (only for OpenCode toolkit)
 
-### 步骤
+### Steps
 
 ```bash
-# 1. 克隆仓库
+# 1. Clone the repository
 git clone https://github.com/your-username/jenny-mcp-server.git
 cd jenny-mcp-server
 
-# 2. 创建虚拟环境并安装依赖
+# 2. Create virtual environment and install dependencies
 cd mcp-server
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 额外依赖（按需安装）
-pip install httpx          # OpenCode 工具包
-pip install pandas matplotlib  # 数据分析工具包
-pip install playwright aiohttp  # Web 增强工具包
-playwright install chromium    # 安装浏览器
+# Optional dependencies (install as needed)
+pip install httpx                # OpenCode toolkit
+pip install pandas matplotlib    # Data analysis toolkit
+pip install playwright aiohttp   # Web enhanced toolkit
+playwright install chromium      # Install browser
 
-# 3. 创建配置文件
+# 3. Create configuration file
 cp ../config/defaults.example.json ../config/defaults.json
-# 编辑 defaults.json 填入实际配置
+# Edit defaults.json with actual settings
 ```
 
-## 使用
+## Usage
 
-### 启动服务器
+### Starting the Server
 
 ```bash
 cd mcp-server
 source .venv/bin/activate
 
-# 默认 0.0.0.0:31415
+# Default: 0.0.0.0:31415
 python server.py
 
-# 自定义地址
+# Custom address
 python server.py --host 127.0.0.1 --port 8080
 ```
 
-服务端点为 `http://<host>:<port>/mcp`（Streamable HTTP 传输）。
+The server endpoint is `http://<host>:<port>/mcp` (Streamable HTTP transport).
 
-### 客户端配置
+### Client Configuration
 
-在 MCP 客户端的配置文件中添加：
+Add the following to your MCP client configuration:
 
 ```json
 {
@@ -148,61 +152,61 @@ python server.py --host 127.0.0.1 --port 8080
 }
 ```
 
-### Shell 脚本（Droid 直接交互）
+### Shell Scripts (Droid Direct Interaction)
 
 ```bash
-# 启动新会话，返回 session-id
+# Start a new session, returns session-id
 SESSION=$(./scripts/start.sh)
 echo "Session: $SESSION"
 
-# 发送消息
+# Send a message
 ./scripts/send.sh "$SESSION" "Create a hello world Python script"
 
-# 轮询输出
-./scripts/poll.sh "$SESSION" 0    # 从第 0 行开始读取
+# Poll output
+./scripts/poll.sh "$SESSION" 0    # Read from line 0
 
-# 查看所有会话状态
+# View all session statuses
 ./scripts/status.sh
 
-# 查看特定会话
+# View a specific session
 ./scripts/status.sh "$SESSION"
 ```
 
-## API 文档
+## API Reference
 
-### 通用工具
+### Common Tools
 
-这三个工具在任何工具包激活状态下都可用。
+These three tools are available regardless of which toolkit is active.
 
 #### `toolkit_list`
 
-列出所有可用工具包及其工具。
+List all available toolkits and their tools.
 
-**参数：** 无
+**Parameters:** None
 
-**返回示例：**
+**Response example:**
 
 ```json
 {
   "toolkits": {
-    "droid": { "description": "Factory Droid - 文件管道模式", "tools": [...] },
-    "opencode": { "description": "OpenCode - HTTP API 多轮会话模式", "tools": [...] },
-    "data_analysis": { "description": "数据分析工具包 - CSV 查询/统计/可视化", "tools": [...] },
-    "web_enhanced": { "description": "Web Enhanced - JS 渲染抓取", "tools": [...] }
+    "droid": { "description": "Factory Droid - File pipe mode", "tools": [...] },
+    "opencode": { "description": "OpenCode - HTTP API multi-turn session mode", "tools": [...] },
+    "data_analysis": { "description": "Data Analysis - CSV query/stats/visualization", "tools": [...] },
+    "web_enhanced": { "description": "Web Enhanced - JS rendered scraping", "tools": [...] }
   }
 }
 ```
 
 #### `toolkit_switch`
 
-切换当前工具包，工具列表自动更新。
+Switch the active toolkit; tool list updates automatically.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `name` | string | ✅ | 工具包名称：`droid` / `opencode` / `data_analysis` / `web_enhanced` |
-| `config` | string | ❌ | JSON 配置参数 |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | ✅ | Toolkit name: `droid` / `opencode` / `data_analysis` / `web_enhanced` |
+| `config` | string | ❌ | JSON configuration parameters |
 
-**config 参数说明：**
+**Config examples:**
 
 ```jsonc
 // Droid
@@ -214,243 +218,260 @@ echo "Session: $SESSION"
 
 #### `toolkit_current`
 
-显示当前工具包名称和可用工具列表。
+Display the current toolkit name and available tools.
 
 ---
 
-### 🤖 Droid 工具包
+### 🤖 Droid Toolkit
 
-通过文件管道（`tail -f input.jsonl | droid exec`）与 [Factory Droid](https://docs.factory.ai/) 交互。每个会话独立一个目录，支持多轮对话。
+Interacts with [Factory Droid](https://docs.factory.ai/) via file pipe (`tail -f input.jsonl | droid exec`). Each session gets an independent directory, supporting multi-turn conversations.
 
 #### `start_session`
 
-创建一个新的 Droid 会话。
+Create a new Droid session.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `config` | object | ❌ | 覆盖默认配置（model, auto_level, cwd 等） |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `config` | object | ❌ | Override default settings (model, auto_level, cwd, etc.) |
 
-**返回：** `{ "session_id": "uuid", "status": "started", "pid": 12345, "session_dir": "/path" }`
+**Returns:** `{ "session_id": "uuid", "status": "started", "pid": 12345, "session_dir": "/path" }`
 
 #### `send_message`
 
-向指定会话发送消息。
+Send a message to a session.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `session_id` | string | ✅ | 会话 ID |
-| `message` | string | ✅ | 消息内容 |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | ✅ | Session ID |
+| `message` | string | ✅ | Message content |
 
 #### `poll_output`
 
-轮询会话输出，支持增量读取。
+Poll session output with incremental reading support.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `session_id` | string | ✅ | 会话 ID |
-| `last_line` | int | ❌ | 上次读取到的行号，仅返回此行之后的新内容 |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | ✅ | Session ID |
+| `last_line` | int | ❌ | Line number last read; only returns content after this line |
 
-**返回：** `{ "lines": [...], "total_lines": 42 }`
+**Returns:** `{ "lines": [...], "total_lines": 42 }`
 
 #### `check_status`
 
-检查会话状态。
+Check session status.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `session_id` | string | ✅ | 会话 ID |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | ✅ | Session ID |
 
 #### `stop_session`
 
-停止并清理会话。
+Stop and clean up a session.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `session_id` | string | ✅ | 会话 ID |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | ✅ | Session ID |
 
 #### `exec_and_wait`
 
-一站式执行：创建会话 → 发送消息 → 等待完成 → 返回输出。
+All-in-one execution: create session → send message → wait for completion → return output.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `message` | string | ✅ | 要执行的消息 |
-| `timeout` | int | ❌ | 超时秒数，默认 900（15分钟） |
-| `config` | object | ❌ | 会话配置 |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message` | string | ✅ | Message to execute |
+| `timeout` | int | ❌ | Timeout in seconds, default 900 (15 min) |
+| `config` | object | ❌ | Session configuration |
 
 ---
 
-### 🔮 OpenCode 工具包
+### 🔮 OpenCode Toolkit
 
-通过 HTTP API 与 [OpenCode](https://opencode.ai/) 交互。自动管理 `opencode serve` 进程的生命周期。
+Interacts with [OpenCode](https://opencode.ai/) via HTTP API. Automatically manages the lifecycle of the `opencode serve` process.
 
 #### `start_session`
 
-启动 opencode serve 并创建会话。自动检测已有 serve 进程，按需启动。
+Start opencode serve and create a session. Auto-detects existing serve processes and starts one if needed.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `config` | object | ❌ | `model`（如 `"opencode/big-pickle"`）、`workdir` |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `config` | object | ❌ | `model` (e.g. `"opencode/big-pickle"`), `workdir` |
 
 #### `send_message`
 
-向会话发送消息。OpenCode API 同步等待响应，直接返回结果。
+Send a message to an OpenCode session.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `session_id` | string | ✅ | 会话 ID |
-| `message` | string | ✅ | 消息内容 |
-
-**返回：** `{ "response": "...", "reasoning": "...", "message_id": "..." }`
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | ✅ | Session ID |
+| `message` | string | ✅ | Message content |
 
 #### `poll_output`
 
-获取会话消息列表（历史记录）。
+Poll OpenCode session output.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | ✅ | Session ID |
+| `last_line` | int | ❌ | Line number last read |
 
 #### `check_status`
 
-检查 serve 进程和会话状态。
+Check OpenCode session status.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | ✅ | Session ID |
 
 #### `stop_session`
 
-删除远程会话。
+Stop an OpenCode session.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | ✅ | Session ID |
 
 #### `exec_and_wait`
 
-一站式执行：创建会话 → 发送消息 → 返回响应。
+All-in-one OpenCode execution.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message` | string | ✅ | Message to execute |
+| `timeout` | int | ❌ | Timeout in seconds |
+| `config` | object | ❌ | Session configuration |
 
 #### `cleanup`
 
-清理所有资源：删除全部会话、停止 serve 进程。
+Clean up all stopped sessions and the serve process.
 
 ---
 
-### 📊 Data Analysis 工具包
+### 📊 Data Analysis Toolkit
 
-基于 Pandas + Matplotlib 的数据分析工具。
+CSV and JSON data analysis tools powered by Pandas and Matplotlib.
 
 #### `csv_info`
 
-获取 CSV 文件基本信息（行数、列名、类型、缺失值）。
+Get basic information about a CSV file (columns, types, shape, preview).
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `file_path` | string | ✅ | CSV 文件路径（支持相对路径，基于 workspace） |
-| `encoding` | string | ❌ | 文件编码，默认 `utf-8` |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_path` | string | ✅ | CSV file path |
+| `preview_rows` | int | ❌ | Number of preview rows, default 5 |
 
 #### `csv_analyze`
 
-CSV 数据统计分析（describe、分组聚合）。
+Statistical analysis of CSV data (describe, group by, etc.).
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `file_path` | string | ✅ | CSV 文件路径 |
-| `operation` | string | ❌ | 操作：`describe` / `groupby`，默认 `describe` |
-| `column` | string | ❌ | 目标列名 |
-| `group_by` | string | ❌ | 分组列（groupby 时必填） |
-| `agg_func` | string | ❌ | 聚合函数：`mean` / `sum` / `count` / `min` / `max`，默认 `mean` |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_path` | string | ✅ | CSV file path |
+| `operation` | string | ❌ | Operation: `describe` / `groupby`, default `describe` |
+| `group_by` | string | ❌ | Group by column (required when operation is `groupby`) |
+| `agg_column` | string | ❌ | Column to aggregate (required when operation is `groupby`) |
+| `agg_func` | string | ❌ | Aggregation: `mean` / `sum` / `count` / `min` / `max`, default `mean` |
 
 #### `csv_query`
 
-使用 SQL 风格查询 CSV 数据（基于 Pandas DataFrame.query）。
+Query CSV data using SQL-style expressions (based on Pandas DataFrame.query).
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `file_path` | string | ✅ | CSV 文件路径 |
-| `query` | string | ✅ | 查询表达式，如 `"age > 30 & city == 'Beijing'"` |
-| `columns` | string | ❌ | 选择列，逗号分隔，如 `"name,age,city"` |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_path` | string | ✅ | CSV file path |
+| `query` | string | ✅ | Query expression, e.g. `"age > 30 & city == 'Beijing'"` |
+| `columns` | string | ❌ | Columns to select, comma-separated, e.g. `"name,age,city"` |
 
 #### `csv_chart`
 
-CSV 数据可视化（生成图表保存为 PNG）。
+CSV data visualization (generates chart and saves as PNG).
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `file_path` | string | ✅ | CSV 文件路径 |
-| `chart_type` | string | ✅ | 图表类型：`line` / `bar` / `scatter` / `pie` |
-| `x_column` | string | ✅ | X 轴列名 |
-| `y_column` | string | ✅ | Y 轴列名（pie 图为数值列） |
-| `title` | string | ❌ | 图表标题 |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_path` | string | ✅ | CSV file path |
+| `chart_type` | string | ✅ | Chart type: `line` / `bar` / `scatter` / `pie` |
+| `x_column` | string | ✅ | X-axis column name |
+| `y_column` | string | ✅ | Y-axis column name (value column for pie charts) |
+| `title` | string | ❌ | Chart title |
 
-**返回：** `{ "chart_path": "/tmp/data_analysis_charts/chart_xxx.png", "data_points": 100 }`
+**Returns:** `{ "chart_path": "/tmp/data_analysis_charts/chart_xxx.png", "data_points": 100 }`
 
 #### `json_query`
 
-JSON 文件路径查询。
+JSON file path query.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `file_path` | string | ✅ | JSON 文件路径 |
-| `path` | string | ❌ | 查询路径，如 `users[0].name`，默认 `.`（根） |
-| `pretty` | bool | ❌ | 格式化输出，默认 `true` |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_path` | string | ✅ | JSON file path |
+| `path` | string | ❌ | Query path, e.g. `users[0].name`, default `.` (root) |
+| `pretty` | bool | ❌ | Pretty-print output, default `true` |
 
 ---
 
-### 🌐 Web Enhanced 工具包
+### 🌐 Web Enhanced Toolkit
 
-基于 Playwright + AIOHTTP 的高级网页抓取工具。
+Advanced web scraping tools powered by Playwright + AIOHTTP.
 
 #### `web_fetch_js`
 
-用 Playwright 渲染 JavaScript 后抓取页面内容。
+Fetch page content after JavaScript rendering via Playwright.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `url` | string | ✅ | 目标 URL |
-| `selector` | string | ❌ | CSS 选择器，仅提取匹配元素 |
-| `wait_for` | string | ❌ | 等待选择器出现后再抓取 |
-| `timeout` | int | ❌ | 超时秒数，默认 30 |
-| `use_cookies` | string | ❌ | Cookie 文件路径（由 web_login 生成） |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string | ✅ | Target URL |
+| `selector` | string | ❌ | CSS selector, extract only matching elements |
+| `wait_for` | string | ❌ | Wait for selector to appear before fetching |
+| `timeout` | int | ❌ | Timeout in seconds, default 30 |
+| `use_cookies` | string | ❌ | Cookie file path (generated by web_login) |
 
 #### `web_batch_fetch`
 
-批量并发抓取多个 URL。
+Batch concurrent fetching of multiple URLs.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `urls` | string | ✅ | URL 列表，JSON 数组格式 |
-| `max_concurrent` | int | ❌ | 最大并发数，默认 5 |
-| `timeout` | int | ❌ | 每个请求超时秒数，默认 30 |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `urls` | string | ✅ | URL list in JSON array format |
+| `max_concurrent` | int | ❌ | Max concurrency, default 5 |
+| `timeout` | int | ❌ | Timeout per request in seconds, default 30 |
 
 #### `web_search_enhanced`
 
-增强搜索（支持时间/站点过滤、结果提取）。
+Enhanced search (supports time/site filtering, content extraction).
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `query` | string | ✅ | 搜索关键词 |
-| `max_results` | int | ❌ | 最大结果数，默认 10 |
-| `time_range` | string | ❌ | 时间范围：`day` / `week` / `month` / `year` |
-| `site` | string | ❌ | 限制站点，如 `github.com` |
-| `fetch_content` | bool | ❌ | 是否抓取结果页面内容，默认 `false` |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | ✅ | Search keywords |
+| `max_results` | int | ❌ | Max results, default 10 |
+| `time_range` | string | ❌ | Time range: `day` / `week` / `month` / `year` |
+| `site` | string | ❌ | Restrict to site, e.g. `github.com` |
+| `fetch_content` | bool | ❌ | Whether to fetch result page content, default `false` |
 
 #### `web_login`
 
-浏览器登录并保存 Cookies。
+Browser login and save cookies.
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `url` | string | ✅ | 登录页面 URL |
-| `username_selector` | string | ✅ | 用户名输入框 CSS 选择器 |
-| `password_selector` | string | ✅ | 密码输入框 CSS 选择器 |
-| `username` | string | ✅ | 用户名 |
-| `password` | string | ✅ | 密码 |
-| `submit_selector` | string | ❌ | 提交按钮选择器（为空则按 Enter） |
-| `cookies_file` | string | ❌ | Cookie 保存路径 |
-| `wait_after_login` | int | ❌ | 登录后等待秒数，默认 3 |
-| `verify_selector` | string | ❌ | 登录成功后验证元素选择器 |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | string | ✅ | Login page URL |
+| `username_selector` | string | ✅ | Username input CSS selector |
+| `password_selector` | string | ✅ | Password input CSS selector |
+| `username` | string | ✅ | Username |
+| `password` | string | ✅ | Password |
+| `submit_selector` | string | ❌ | Submit button selector (press Enter if empty) |
+| `cookies_file` | string | ❌ | Cookie save path |
+| `wait_after_login` | int | ❌ | Seconds to wait after login, default 3 |
+| `verify_selector` | string | ❌ | Selector to verify successful login |
 
 ---
 
-## 配置
+## Configuration
 
-复制配置模板并修改：
+Copy the template and modify:
 
 ```bash
 cp config/defaults.example.json config/defaults.json
 ```
 
-`config/defaults.json`：
+`config/defaults.json`:
 
 ```json
 {
@@ -464,51 +485,72 @@ cp config/defaults.example.json config/defaults.json
 }
 ```
 
-| 字段 | 说明 | 默认值 |
-|------|------|--------|
-| `model` | Droid 使用的模型 | — |
-| `auto_level` | 自动执行级别 `low` / `medium` / `high` | `high` |
-| `reasoning_effort` | 推理强度 `none` / `low` / `medium` / `high` | `none` |
-| `interaction_mode` | 交互模式 | `auto` |
-| `cwd` | 代理工作目录 | 项目 workspace 目录 |
-| `poll_interval_seconds` | 轮询间隔 | `30` |
-| `max_wait_minutes` | 最大等待时间 | `15` |
+| Field | Description | Default |
+|-------|-------------|---------|
+| `model` | Model used by Droid | — |
+| `auto_level` | Auto execution level `low` / `medium` / `high` | `high` |
+| `reasoning_effort` | Reasoning intensity `none` / `low` / `medium` / `high` | `none` |
+| `interaction_mode` | Interaction mode | `auto` |
+| `cwd` | Agent working directory | Project workspace directory |
+| `poll_interval_seconds` | Polling interval | `30` |
+| `max_wait_minutes` | Maximum wait time | `15` |
 
-### 环境变量
+### Environment Variables
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `DROID_BIN` | Droid CLI 路径 | `droid` |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DROID_BIN` | Path to Droid CLI | `droid` |
 
-## 开发
+## Development
 
-### 添加新工具包
+### Adding a New Toolkit
 
-1. 在 `mcp-server/toolkits/` 下创建新文件，继承 `BaseToolkit`：
+1. Create a new file under `mcp-server/toolkits/`, inheriting from `BaseToolkit`:
 
 ```python
 from .base import BaseToolkit
 
 class MyToolkit(BaseToolkit):
     name = "my_toolkit"
-    description = "我的工具包"
+    description = "My toolkit"
 
     def get_config_schema(self) -> dict:
-        return {"key": "说明"}
+        return {"key": "description"}
 
     def get_tools(self) -> list:
         return [
-            (self.my_tool, "my_tool", "工具描述"),
+            (self.my_tool, "my_tool", "Tool description"),
         ]
 
     async def my_tool(self, param: str) -> dict:
         return {"result": "..."}
 ```
 
-2. 在 `toolkits/__init__.py` 中导出
-3. 在 `toolkits/manager.py` 中注册
-4. 在 `server.py` 中添加工具路由（使用 `@_reg` 装饰器）
+2. Export it in `toolkits/__init__.py`
+3. Register it in `toolkits/manager.py`
+4. Add tool routing in `server.py` (using the `@_reg` decorator)
 
-## License
+## License & Compliance
 
-MIT
+### This Project
+
+Jenny MCP Server is released under the **MIT License** (see [LICENSE](./LICENSE)).
+
+### Third-Party Components
+
+This tool server integrates with the following third-party tools via standard interfaces. These tools are **not included** in this project's distribution:
+
+| Component | License | Notes |
+|-----------|---------|-------|
+| [Factory Droid](https://docs.factory.ai/) | Proprietary (Source Available) | Integrated via `droid exec --input-format stream-jsonrpc` public CLI interface. Droid is a proprietary product of Factory AI, Copyright © 2025-2026 Factory AI. All rights reserved. |
+| [OpenCode](https://opencode.ai/) | MIT License | Integrated via `opencode serve` HTTP API. OpenCode is open-sourced under MIT. |
+| [FastMCP](https://github.com/modelcontextprotocol/python-sdk) | MIT License | MCP Protocol Python SDK |
+| [Playwright](https://playwright.dev/) | Apache 2.0 | Browser automation engine |
+| [Pandas](https://pandas.pydata.org/) | BSD 3-Clause | Data analysis library |
+| [Matplotlib](https://matplotlib.org/) | PSF License | Chart visualization library |
+
+### Disclaimer
+
+- This project does **not distribute or embed** binaries or source code of Droid, OpenCode, or other third-party tools
+- Users must install and comply with each component's terms of use
+- This project is not affiliated with or endorsed by Factory AI, OpenCode, or any other third-party team
