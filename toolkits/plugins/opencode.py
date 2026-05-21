@@ -1,36 +1,24 @@
-"""
-Opencode 工具包 - HTTP API 多轮会话模式
-
-使用官方 API (https://opencode.ai/docs/server/)：
-- POST /session - 创建会话
-- POST /session/:id/message - 发送消息（同步返回响应）
-- GET /session/:id/message - 获取消息列表
-- DELETE /session/:id - 删除会话
-"""
-
 import asyncio
+import os
 import subprocess
 import uuid
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 import httpx
 
-from .base import BaseToolkit
+from toolkits.base import BaseToolkit
 
 
 class OpencodeToolkit(BaseToolkit):
-    """Opencode 工具包 - HTTP API 多轮会话模式"""
+    """Opencode Toolkit - HTTP API multi-turn session mode"""
 
     name = "opencode"
     description = "OpenCode - HTTP API 多轮会话模式（opencode serve）"
 
-    # Opencode 二进制路径
-    OPENCODE_BIN = os.environ.get("OPENCODE_BIN", "opencode")
+    OPENCODE_BIN = os.environ.get("OPENCODE_BIN", "/root/.opencode/bin/opencode")
 
-    # Opencode 免费模型列表
     FREE_MODELS = [
         "opencode/big-pickle",
         "opencode/minimax-m2.5-free",
@@ -40,49 +28,31 @@ class OpencodeToolkit(BaseToolkit):
         "opencode/nemotron-3-super-free",
     ]
 
-    def __init__(self, workspace_dir: Path, default_model: str = "opencode/big-pickle"):
-        self.workspace_dir = workspace_dir
+    def __init__(self, ctx: dict = None):
+        super().__init__()
+        ctx = ctx or {}
+        base = ctx.get("base_dir", "/tmp/jenny-droid")
+        self.workspace_dir = Path(base) / "workspace"
         self.server_process: Optional[subprocess.Popen] = None
         self.server_url: str = ""
         self.server_port: int = 0
         self.sessions: dict[str, dict] = {}
         self.http_client: Optional[httpx.AsyncClient] = None
-        self._last_activity: float = 0
-        self._idle_timeout = 1800  # 30 分钟无活动自动停止 serve
-        self._gc_task: Optional[asyncio.Task] = None
-        
-        # 解析默认模型
-        if default_model and "/" in default_model:
-            parts = default_model.split("/")
-            self.default_model = {"providerID": parts[0], "modelID": parts[1]}
-        else:
-            self.default_model = {"providerID": "opencode", "modelID": "big-pickle"}
+        self._idle_timeout = 1800
+        self.default_model = {"providerID": "opencode", "modelID": "big-pickle"}
 
-    def start_gc(self):
-        """启动后台回收任务"""
-        if self._gc_task is None or self._gc_task.done():
-            self._gc_task = asyncio.ensure_future(self._gc_loop())
+    def startup(self):
+        self.workspace_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[opencode] startup: workspace={self.workspace_dir}")
 
-    async def _gc_loop(self):
-        """每 60 秒检查：无活动且无会话则停止 serve 进程"""
-        import time
-        while True:
-            await asyncio.sleep(60)
-            if not self.server_process or self.server_process.poll() is not None:
-                continue
-            now = time.time()
-            # 有会话时不回收（会话可能在用）
-            if self.sessions:
-                continue
-            # 无会话且空闲超时，停掉 serve
-            if self._last_activity > 0 and now - self._last_activity > self._idle_timeout:
-                await self._stop_server()
-                print(f"[opencode-gc] Idle {int(now - self._last_activity)}s, stopped server")
+    def _mark_active(self):
+        if self.sessions and self.server_process and self.server_process.poll() is None:
+            self._lease("serve", self._idle_timeout, self._auto_stop_serve_if_idle)
 
-    def _touch(self):
-        """记录活动时间"""
-        import time
-        self._last_activity = time.time()
+    async def _auto_stop_serve_if_idle(self):
+        if not self.sessions:
+            await self._stop_server()
+            print(f"[opencode] serve idle {self._idle_timeout}s, stopped")
 
     def get_config_schema(self) -> dict:
         return {
@@ -91,13 +61,54 @@ class OpencodeToolkit(BaseToolkit):
             "model": f"模型 ID，格式: provider/model。免费模型: {', '.join(self.FREE_MODELS[:3])} 等",
         }
 
+    def get_tools(self):
+        return [
+            (self._tool_start_session, "start_session",
+             "创建 OpenCode 会话。自动启动后台 serve 进程。",
+             [("model", "str", "opencode/big-pickle", "模型 ID"),
+              ("cwd", "Optional[str]", None, "工作目录"),
+              ("port", "int", 4096, "服务器端口")]),
+            (self.send_message, "send_message",
+             "向 OpenCode 会话发送消息。异步模式，自动轮询等待结果。",
+             [("session_id", "str", None, "会话 ID"),
+              ("message", "str", None, "消息内容")]),
+            (self.poll_output, "poll_output",
+             "获取 OpenCode 会话的消息列表。",
+             [("session_id", "str", None, "会话 ID"),
+              ("last_line", "int", 0, "上次读取到的行号")]),
+            (self.check_status, "check_status",
+             "检查会话或服务器状态。",
+             [("session_id", "Optional[str]", None, "会话 ID")]),
+            (self.stop_session, "stop_session",
+             "删除 Opencode 会话。",
+             [("session_id", "str", None, "会话 ID")]),
+            (self._tool_exec_and_wait, "exec_and_wait",
+             "一站式执行：创建会话 → 发送消息 → 返回响应。",
+             [("message", "str", None, "任务描述"),
+              ("timeout", "int", 300, "超时秒数"),
+              ("cwd", "Optional[str]", None, "工作目录")]),
+            (self._tool_cleanup, "cleanup",
+             "清理 Opencode 资源（停止服务器）。",
+             []),
+        ]
+
+    async def _tool_start_session(self, model="opencode/big-pickle", cwd=None, port=4096) -> dict:
+        config = {"model": model, "workdir": cwd, "cwd": cwd, "port": port}
+        return await self.start_session(config)
+
+    async def _tool_exec_and_wait(self, message, timeout=300, cwd=None) -> dict:
+        config = {"workdir": cwd, "cwd": cwd}
+        return await self.exec_and_wait(message, timeout, config)
+
+    async def _tool_cleanup(self) -> dict:
+        return await self.cleanup()
+
     async def _ensure_client(self) -> httpx.AsyncClient:
         if self.http_client is None or self.http_client.is_closed:
-            self.http_client = httpx.AsyncClient(timeout=300.0)  # 5分钟超时
+            self.http_client = httpx.AsyncClient(timeout=300.0)
         return self.http_client
 
     async def _start_server(self, port: int, workdir: str) -> dict:
-        """启动 opencode serve 后台服务器"""
         if self.server_process and self.server_process.poll() is None:
             return {"status": "already_running", "url": self.server_url}
 
@@ -109,9 +120,8 @@ class OpencodeToolkit(BaseToolkit):
             cwd=workdir,
         )
 
-        await asyncio.sleep(3)  # 等待服务器启动
+        await asyncio.sleep(3)
 
-        # 检查健康
         client = await self._ensure_client()
         try:
             resp = await client.get(f"http://127.0.0.1:{port}/global/health")
@@ -125,7 +135,7 @@ class OpencodeToolkit(BaseToolkit):
         return {"error": "Server not responding"}
 
     async def _stop_server(self) -> dict:
-        """停止服务器"""
+        self._release("serve")
         if self.server_process:
             self.server_process.terminate()
             try:
@@ -140,20 +150,17 @@ class OpencodeToolkit(BaseToolkit):
         return {"status": "stopped"}
 
     async def start_session(self, config: dict) -> dict:
-        """创建 Opencode 会话"""
-        self._touch()
+        self._mark_active()
         port = config.get("port", 4096)
         workdir = config.get("workdir") or config.get("cwd") or str(self.workspace_dir)
         model_str = config.get("model", "opencode/big-pickle")
 
-        # 解析模型
         if model_str and "/" in model_str:
             parts = model_str.split("/")
             self.default_model = {"providerID": parts[0], "modelID": parts[1]}
         else:
             self.default_model = {"providerID": "opencode", "modelID": "big-pickle"}
 
-        # 确保服务器运行
         if not self.server_url or self.server_port != port:
             result = await self._start_server(port, workdir)
             if "error" in result:
@@ -161,7 +168,6 @@ class OpencodeToolkit(BaseToolkit):
 
         client = await self._ensure_client()
 
-        # 创建新 session
         try:
             resp = await client.post(
                 f"{self.server_url}/session",
@@ -191,11 +197,12 @@ class OpencodeToolkit(BaseToolkit):
             return {"error": f"Failed to create session: {e}"}
 
     async def send_message(self, session_id: str, message: str, timeout: int = 120) -> dict:
-        """发送消息到 Opencode 会话（异步轮询模式）
+        """Send a message to an Opencode session (async polling mode).
 
-        POST 消息后如果未立即返回，则轮询消息列表等待 AI 响应完成。
+        After POSTing the message, if no immediate response is returned,
+        polls the message list until the AI response is complete.
         """
-        self._touch()
+        self._mark_active()
         if session_id not in self.sessions:
             return {"error": f"Session {session_id} not found"}
 
@@ -211,14 +218,12 @@ class OpencodeToolkit(BaseToolkit):
             body["model"] = self.default_model
 
         try:
-            # 记录发送前的消息数量
             try:
                 count_resp = await client.get(f"{self.server_url}/session/{session_id}/message")
                 msg_count_before = len(count_resp.json()) if count_resp.status_code == 200 else 0
             except Exception:
                 msg_count_before = 0
 
-            # POST 消息，短超时：如果 API 同步返回就直接拿结果
             try:
                 resp = await client.post(
                     f"{self.server_url}/session/{session_id}/message",
@@ -227,15 +232,13 @@ class OpencodeToolkit(BaseToolkit):
                 )
                 if resp.status_code == 200:
                     return self._parse_message_response(session_id, resp.json())
-                # 非 200 但不是超时，直接报错
                 if resp.status_code != 408:
                     return {"error": f"Failed to send message: {resp.status_code}", "body": resp.text[:200]}
             except httpx.TimeoutException:
-                pass  # 超时了，走轮询
+                pass
             except httpx.ConnectError as e:
                 return {"error": f"Connection error: {e}"}
 
-            # 轮询等待响应：消息数量增加且最后一条是 assistant 回复
             import time
             deadline = time.time() + timeout
             poll_interval = 2.0
@@ -248,15 +251,12 @@ class OpencodeToolkit(BaseToolkit):
                         continue
                     messages = poll_resp.json()
                     if len(messages) > msg_count_before:
-                        # 取最后一条 assistant 消息
                         for msg in reversed(messages):
                             info = msg.get("info", {})
                             if info.get("role") == "assistant":
                                 return self._parse_message_response(session_id, msg)
-                        # 有新消息但还没 assistant 回复，继续等
                 except Exception:
                     pass
-                # 逐步增加轮询间隔，最大 5 秒
                 poll_interval = min(poll_interval + 0.5, 5.0)
 
             return {"error": "timeout", "session_id": session_id, "detail": f"No response within {timeout}s, use poll_output to check"}
@@ -265,7 +265,6 @@ class OpencodeToolkit(BaseToolkit):
             return {"error": f"Failed to send message: {e}"}
 
     def _parse_message_response(self, session_id: str, result: dict) -> dict:
-        """解析 opencode 消息响应"""
         info = result.get("info", {})
         parts = result.get("parts", [])
 
@@ -302,8 +301,8 @@ class OpencodeToolkit(BaseToolkit):
         }
 
     async def poll_output(self, session_id: str, last_line: int = 0) -> dict:
-        """获取会话消息列表"""
-        self._touch()
+        """Get the message list for a session."""
+        self._mark_active()
         if session_id not in self.sessions:
             return {"error": f"Session {session_id} not found"}
 
@@ -335,7 +334,6 @@ class OpencodeToolkit(BaseToolkit):
                     "role": info.get("role", "unknown"),
                 }
 
-                # 提取文本
                 text_parts = []
                 for part in parts:
                     if part.get("type") == "text":
@@ -353,20 +351,18 @@ class OpencodeToolkit(BaseToolkit):
             return {"error": f"Failed to poll output: {e}"}
 
     async def check_status(self, session_id: Optional[str] = None) -> dict:
-        """检查会话状态"""
+        """Check session status."""
         client = await self._ensure_client()
 
         if not self.server_url:
             return {"error": "Server not started"}
 
         try:
-            # 检查服务器健康
             resp = await client.get(f"{self.server_url}/global/health")
             health = resp.json()
 
             if session_id:
                 if session_id not in self.sessions:
-                    # 尝试从服务器获取
                     resp = await client.get(f"{self.server_url}/session/{session_id}")
                     if resp.status_code == 200:
                         session_data = resp.json()
@@ -388,7 +384,6 @@ class OpencodeToolkit(BaseToolkit):
                     "server_health": health,
                 }
 
-            # 列出所有 session
             resp = await client.get(f"{self.server_url}/session")
             remote_sessions = resp.json()
 
@@ -403,7 +398,7 @@ class OpencodeToolkit(BaseToolkit):
             return {"error": f"Failed to check status: {e}"}
 
     async def stop_session(self, session_id: str) -> dict:
-        """删除会话"""
+        """Delete a session."""
         if session_id not in self.sessions:
             return {"error": f"Session {session_id} not found"}
 
@@ -418,18 +413,15 @@ class OpencodeToolkit(BaseToolkit):
             return {"status": "stopped", "session_id": session_id, "error": str(e)}
 
     async def exec_and_wait(self, message: str, timeout: int, config: dict) -> dict:
-        """一站式执行：创建会话 → 发送消息 → 返回响应"""
         import time
         start = time.time()
 
-        # 1. 创建会话
         session_result = await self.start_session(config)
         if "error" in session_result:
             return session_result
 
         session_id = session_result["session_id"]
 
-        # 2. 发送消息（同步 API 自动等待响应）
         send_result = await self.send_message(session_id, message)
         elapsed = time.time() - start
 
@@ -442,7 +434,6 @@ class OpencodeToolkit(BaseToolkit):
                 "duration_seconds": int(elapsed),
             }
 
-        # 3. 返回结果
         return {
             "success": True,
             "output": send_result.get("response", ""),
@@ -453,8 +444,6 @@ class OpencodeToolkit(BaseToolkit):
         }
 
     async def cleanup(self) -> dict:
-        """清理所有资源"""
-        # 删除所有本地会话
         for sid in list(self.sessions.keys()):
             try:
                 await self.stop_session(sid)

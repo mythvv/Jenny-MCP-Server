@@ -25,12 +25,13 @@ Thumbs.db
 # Runtime data (sessions contain user-specific info)
 sessions/
 workspace/
+logs/
 
 # Config with potential secrets
 config/defaults.json
 
-# Logs
-*.log
+# Tool-specific config (users may put secrets here)
+toolkits/plugins/droid_config.json
 
 # Temporary files
 *.tmp

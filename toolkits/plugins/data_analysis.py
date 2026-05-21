@@ -1,14 +1,3 @@
-"""
-DataAnalysis 工具包 - CSV/JSON 数据分析
-
-提供五个工具：
-- csv_info: CSV 文件基本信息（行数、列名、类型、缺失值统计）
-- csv_analyze: CSV 数据统计分析（describe、分组聚合）
-- csv_query: SQL 风格查询 CSV 数据
-- csv_chart: CSV 数据可视化（折线图、柱状图、散点图、饼图）
-- json_query: JSON 文件查询（JMESPath / JSONPath 风格）
-"""
-
 import io
 import os
 import json
@@ -17,36 +6,72 @@ from typing import Optional
 
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")  # 无头模式
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from .base import BaseToolkit
+from toolkits.base import BaseToolkit
 
 
 class DataAnalysisToolkit(BaseToolkit):
-    """DataAnalysis 工具包 - CSV/JSON 数据分析"""
+    """DataAnalysis Toolkit - CSV/JSON data analysis."""
 
     name = "data_analysis"
-    description = "数据分析工具包 - CSV 查询/统计/可视化，JSON 查询"
+    description = "Data analysis toolkit - CSV query/statistics/visualization, JSON query"
 
-    # 输出图表保存目录
     CHART_DIR = "/tmp/data_analysis_charts"
 
-    def __init__(self, workspace_dir: str = "."):
-        self.workspace_dir = Path(workspace_dir)
+    def __init__(self, ctx: dict = None):
+        super().__init__()
+        ctx = ctx or {}
+        base = ctx.get("base_dir", ".")
+        self.workspace_dir = Path(base) / "workspace"
         os.makedirs(self.CHART_DIR, exist_ok=True)
 
     def get_config_schema(self) -> dict:
         return {
-            "workspace_dir": "工作目录，默认为项目 workspace",
+            "workspace_dir": "Working directory, defaults to project workspace",
         }
 
-    # ------------------------------------------------------------------
-    # Helper
-    # ------------------------------------------------------------------
+    def get_tools(self):
+        return [
+            (self.csv_info, "csv_info",
+             "获取 CSV 文件基本信息（行数、列名、类型、缺失值统计）。",
+             [("file_path", "str", None, "CSV 文件路径"),
+              ("encoding", "str", "utf-8", "文件编码")]),
+            (self.csv_analyze, "csv_analyze",
+             "对 CSV 指定列做统计分析（均值、中位数、分位数、分布等）。",
+             [("file_path", "str", None, "CSV 文件路径"),
+              ("columns", "Optional[str]", None, "要分析的列，逗号分隔"),
+              ("group_by", "Optional[str]", None, "分组列名"),
+              ("agg", "str", "mean", "聚合方式 mean/sum/count/min/max/std/median"),
+              ("encoding", "str", "utf-8", "文件编码")]),
+            (self.csv_query, "csv_query",
+             "用 pandas 表达式筛选/过滤/排序 CSV 数据。支持 SQL 风格的查询。",
+             [("file_path", "str", None, "CSV 文件路径"),
+              ("select", "str", "*", "返回列，逗号分隔，如 'name,age,score'"),
+              ("where", "Optional[str]", None, "过滤表达式，如 'age > 18 and score >= 60'"),
+              ("order_by", "Optional[str]", None, "排序列，加前缀 desc 表示降序，如 'score desc'"),
+              ("limit", "int", 100, "返回行数上限"),
+              ("encoding", "str", "utf-8", "文件编码")]),
+            (self.csv_chart, "csv_chart",
+             "用 matplotlib 生成图表并保存为 PNG。支持折线/柱状/散点/饼/直方图。",
+             [("file_path", "str", None, "CSV 文件路径"),
+              ("chart_type", "str", None, "图表类型: line(折线)/bar(柱状)/scatter(散点)/pie(饼)/hist(直方)"),
+              ("x", "str", None, "X 轴列名"),
+              ("y", "Optional[str]", None, "Y 轴列名（pie/hist 可不传）"),
+              ("title", "Optional[str]", None, "图表标题"),
+              ("limit", "int", 500, "最大数据点数"),
+              ("encoding", "str", "utf-8", "文件编码")]),
+            (self.json_query, "json_query",
+             "解析 JSON 文件，支持字典路径查询。",
+             [("file_path", "str", None, "JSON 文件路径"),
+              ("path", "str", ".", "查询路径"),
+              ("pretty", "bool", True, "是否格式化输出"),
+              ("encoding", "str", "utf-8", "文件编码")]),
+        ]
 
     def _resolve_path(self, file_path: str) -> Path:
-        """解析文件路径，支持相对路径（基于 workspace）"""
+        """Resolve file path, supports relative paths (based on workspace)."""
         p = Path(file_path)
         if not p.is_absolute():
             p = self.workspace_dir / p
@@ -55,7 +80,7 @@ class DataAnalysisToolkit(BaseToolkit):
         return p
 
     def _safe_df(self, df: pd.DataFrame, max_rows: int = 200) -> dict:
-        """将 DataFrame 安全序列化为 dict，截断过长的数据"""
+        """Safely serialize DataFrame to dict, truncating long data."""
         total = len(df)
         show = df.head(max_rows)
         return {
@@ -65,17 +90,12 @@ class DataAnalysisToolkit(BaseToolkit):
             "columns": list(df.columns),
         }
 
-    # ------------------------------------------------------------------
-    # 工具实现
-    # ------------------------------------------------------------------
-
     async def csv_info(self, file_path: str, encoding: str = "utf-8") -> dict:
-        """获取 CSV 文件基本信息"""
+        """Get basic CSV file information."""
         try:
             p = self._resolve_path(file_path)
             df = pd.read_csv(p, encoding=encoding)
 
-            # 基本信息
             info = {
                 "file": str(p),
                 "file_size_bytes": p.stat().st_size,
@@ -99,20 +119,11 @@ class DataAnalysisToolkit(BaseToolkit):
         agg: str = "mean",
         encoding: str = "utf-8",
     ) -> dict:
-        """CSV 数据统计分析
-
-        Args:
-            file_path: CSV 文件路径
-            columns: 要分析的列，逗号分隔，默认全部数值列
-            group_by: 分组列名
-            agg: 聚合函数 mean/sum/count/min/max/std/median
-            encoding: 文件编码
-        """
+        """Perform statistical analysis on CSV data."""
         try:
             p = self._resolve_path(file_path)
             df = pd.read_csv(p, encoding=encoding)
 
-            # 筛选列
             if columns:
                 col_list = [c.strip() for c in columns.split(",")]
                 missing = [c for c in col_list if c not in df.columns]
@@ -120,7 +131,6 @@ class DataAnalysisToolkit(BaseToolkit):
                     return {"error": f"列不存在: {missing}", "available_columns": list(df.columns)}
                 df = df[col_list]
 
-            # 分组聚合
             if group_by:
                 if group_by not in df.columns:
                     return {"error": f"分组列不存在: {group_by}", "available_columns": list(df.columns)}
@@ -132,7 +142,6 @@ class DataAnalysisToolkit(BaseToolkit):
                 result = df.groupby(group_by)[numeric_cols].agg(agg)
                 return self._safe_df(result.reset_index())
             else:
-                # 整体统计
                 numeric_df = df.select_dtypes(include="number")
                 if numeric_df.empty:
                     return {"error": "没有数值列可分析"}
@@ -150,25 +159,14 @@ class DataAnalysisToolkit(BaseToolkit):
         limit: int = 100,
         encoding: str = "utf-8",
     ) -> dict:
-        """SQL 风格查询 CSV 数据
-
-        Args:
-            file_path: CSV 文件路径
-            select: 要查询的列，逗号分隔，默认 *（全部）
-            where: 筛选条件表达式，如 "age > 30 and city == '北京'"
-            order_by: 排序列，支持 "col" 或 "col desc"
-            limit: 返回行数上限
-            encoding: 文件编码
-        """
+        """Query CSV data in SQL style."""
         try:
             p = self._resolve_path(file_path)
             df = pd.read_csv(p, encoding=encoding)
 
-            # WHERE
             if where:
                 df = df.query(where)
 
-            # SELECT
             if select.strip() != "*":
                 col_list = [c.strip() for c in select.split(",")]
                 missing = [c for c in col_list if c not in df.columns]
@@ -176,7 +174,6 @@ class DataAnalysisToolkit(BaseToolkit):
                     return {"error": f"列不存在: {missing}", "available_columns": list(df.columns)}
                 df = df[col_list]
 
-            # ORDER BY
             if order_by:
                 parts = order_by.strip().rsplit(maxsplit=1)
                 if len(parts) == 2 and parts[1].lower() == "desc":
@@ -184,7 +181,6 @@ class DataAnalysisToolkit(BaseToolkit):
                 else:
                     df = df.sort_values(order_by.strip())
 
-            # LIMIT
             df = df.head(limit)
 
             return self._safe_df(df)
@@ -201,17 +197,7 @@ class DataAnalysisToolkit(BaseToolkit):
         limit: int = 500,
         encoding: str = "utf-8",
     ) -> dict:
-        """CSV 数据可视化生成图表
-
-        Args:
-            file_path: CSV 文件路径
-            chart_type: 图表类型 line/bar/scatter/pie/hist
-            x: X 轴列名
-            y: Y 轴列名（pie/hist 模式可省略）
-            title: 图表标题
-            limit: 最大数据点数
-            encoding: 文件编码
-        """
+        """Generate charts from CSV data visualization."""
         try:
             p = self._resolve_path(file_path)
             df = pd.read_csv(p, encoding=encoding).head(limit)
@@ -251,7 +237,6 @@ class DataAnalysisToolkit(BaseToolkit):
 
             plt.tight_layout()
 
-            # 保存
             out_name = f"chart_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.png"
             out_path = os.path.join(self.CHART_DIR, out_name)
             fig.savefig(out_path, dpi=150)
@@ -274,32 +259,17 @@ class DataAnalysisToolkit(BaseToolkit):
         pretty: bool = True,
         encoding: str = "utf-8",
     ) -> dict:
-        """JSON 文件查询
-
-        支持 Python 字典路径风格查询，例如：
-        - "." : 返回根对象
-        - "users" : 返回 users 字段
-        - "users[0].name" : 返回第一个用户的 name
-        - "data.items" : 嵌套路径
-
-        Args:
-            file_path: JSON 文件路径
-            path: 查询路径，默认 "."（根）
-            pretty: 是否格式化输出
-            encoding: 文件编码
-        """
+        """Query JSON files with dictionary path style."""
         try:
             p = self._resolve_path(file_path)
             with open(p, "r", encoding=encoding) as f:
                 data = json.load(f)
 
-            # 路径解析
             if path and path != ".":
                 result = self._resolve_json_path(data, path)
             else:
                 result = data
 
-            # 截断控制
             text = json.dumps(result, ensure_ascii=False, indent=2 if pretty else None)
             max_len = 50000
             truncated = False
@@ -317,20 +287,18 @@ class DataAnalysisToolkit(BaseToolkit):
             return {"error": str(e)}
 
     def _resolve_json_path(self, data, path: str):
-        """解析简单的 JSON 路径，如 users[0].name"""
+        """Resolve simple JSON path, e.g. users[0].name."""
         import re
         parts = re.split(r"\.(?![^\[]*\])", path)
         current = data
         for part in parts:
             if not part:
                 continue
-            # 处理 array index: items[0]
             match = re.match(r"^(\w+)\[(\d+)\]$", part)
             if match:
                 key, idx = match.group(1), int(match.group(2))
                 current = current[key][idx]
             elif "[" in part:
-                # 纯索引 [0]
                 idx = int(re.search(r"\[(\d+)\]", part).group(1))
                 current = current[idx]
             else:

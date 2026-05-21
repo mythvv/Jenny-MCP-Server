@@ -3,7 +3,6 @@
   "auto_level": "high",
   "reasoning_effort": "none",
   "interaction_mode": "auto",
-  "cwd": "/path/to/workspace",
   "poll_interval_seconds": 30,
   "max_wait_minutes": 15
 }

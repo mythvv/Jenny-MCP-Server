@@ -4,18 +4,19 @@
 [![Python ≥3.11](https://img.shields.io/badge/Python-%E2%89%A53.11-blue.svg)](https://www.python.org/)
 [![MCP Protocol](https://img.shields.io/badge/MCP-Protocol-green.svg)](https://modelcontextprotocol.io/)
 
-> A lightweight tool server that unifies AI coding agents, data analysis, and web scraping via the MCP (Model Context Protocol) protocol.
+> A plugin-based MCP tool server with dynamic toolkit switching, automatic discovery, and resource lease management.
 
 Jenny MCP Server is a tool server built on [FastMCP](https://github.com/modelcontextprotocol/python-sdk) that provides dynamically switchable toolkits for AI assistants. It wraps coding agents like Droid and OpenCode, along with data analysis and web scraping capabilities, as standard MCP tools — any MCP-compatible client can call them directly.
 
 ## ✨ Features
 
 - 🔄 **Dynamic Toolkit Switching** — Switch toolkits at runtime; tool lists update automatically
+- 🧩 **Plugin Auto-Discovery** — Drop a `.py` file or package into `toolkits/plugins/`, restart to activate
 - 🤖 **Multiple Coding Agents** — Supports [Factory Droid](https://docs.factory.ai/) (file pipe) and [OpenCode](https://opencode.ai/) (HTTP API)
 - 📊 **Data Analysis** — CSV query/stats/visualization, JSON path queries
 - 🌐 **Web Scraping** — JS-rendered fetching, batch concurrency, enhanced search, browser login
-- ⏱ **Session Management** — Auto GC, idle timeout reclamation, orphan session cleanup
-- 📜 **Shell Scripts** — Bundled start/send/poll/status scripts for direct CLI interaction
+- ⏱ **Resource Lease** — Built-in TTL-based resource reclamation (sessions, browsers, processes)
+- 📜 **Zero Framework Knowledge** — `server.py` knows nothing about plugins; add new tools without touching the core
 
 ## Architecture
 
@@ -31,6 +32,7 @@ Jenny MCP Server is a tool server built on [FastMCP](https://github.com/modelcon
 │  ┌─────────────────────────────────────────────────┐  │
 │  │           Common Tools (always visible)          │  │
 │  │   toolkit_list / toolkit_switch / toolkit_current│  │
+│  │              exec_tool (universal entry)         │  │
 │  └─────────────────────┬───────────────────────────┘  │
 │                        │ Dynamic switching             │
 │  ┌─────────┬───────────┼───────────┬──────────────┐   │
@@ -45,512 +47,211 @@ Jenny MCP Server is a tool server built on [FastMCP](https://github.com/modelcon
    └────────┘ └────────┘ └────────┘ └──────────┘
 ```
 
-### Session Model
-
-```
-                    Droid (File Pipe Mode)
- ┌────────┐  input.jsonl   ┌──────────┐
- │ Client │ ──────────────►│  droid   │
- │        │  (JSON-RPC)    │  exec    │
- │        │◄────────────── │  (tail)  │
- └────────┘  output.jsonl  └──────────┘
-
-                    OpenCode (HTTP API Mode)
- ┌────────┐   POST /session/{id}/message   ┌──────────┐
- │ Server │ ──────────────────────────────► │ opencode │
- │        │ ◄────────────────────────────── │  serve   │
- └────────┘   JSON response (sync wait)     └──────────┘
-```
-
 ## Directory Structure
 
 ```
 jenny-mcp-server/
-├── config/
-│   └── defaults.example.json   # Configuration template
-├── mcp-server/
-│   ├── server.py               # MCP server entry + tool routing
-│   ├── requirements.txt        # Python dependencies
-│   └── toolkits/
-│       ├── __init__.py         # Toolkit exports
-│       ├── base.py             # Abstract base class BaseToolkit
-│       ├── manager.py          # Toolkit manager ToolkitManager
-│       ├── droid.py            # Droid toolkit
-│       ├── opencode.py         # OpenCode toolkit
-│       ├── data_analysis.py    # Data analysis toolkit
-│       └── web_enhanced.py     # Web enhanced toolkit
-├── scripts/
-│   ├── start.sh                # Start a Droid session
-│   ├── send.sh                 # Send message to session
-│   ├── poll.sh                 # Poll session output
-│   └── status.sh               # View session status
-├── sessions/                   # Session data (generated at runtime)
-├── workspace/                  # Agent workspace (generated at runtime)
-└── README.md
+├── server.py              # Framework entry point (zero plugin knowledge)
+├── requirements.txt       # Python dependencies
+├── start.sh / stop.sh / restart.sh  # Process management scripts
+│
+└── toolkits/
+    ├── __init__.py         # Exports BaseToolkit + ToolkitManager
+    ├── base.py             # Abstract base (lifecycle hooks + Lease + auto param extraction)
+    ├── manager.py          # Plugin discovery + registration + switching
+    │
+    └── plugins/            # All toolkits (auto-discovered)
+        ├── droid.py            # Droid file-pipe mode (coding agent)
+        ├── droid_config.json   # Droid private config (gitignored)
+        ├── opencode.py         # OpenCode HTTP API mode (coding agent)
+        ├── data_analysis.py    # CSV/JSON analysis + visualization
+        └── web_enhanced.py     # JS rendering / batch fetch / search / login
+
+# Auto-generated at runtime
+logs/                      # RotatingFileHandler (10MB per file, 3 backups)
 ```
 
-## Installation
-
-### Prerequisites
-
-- Python 3.11+
-- [Factory Droid CLI](https://docs.factory.ai/) (only for Droid toolkit)
-- [OpenCode](https://opencode.ai/) (only for OpenCode toolkit)
-
-### Steps
+## Quick Start
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/your-username/jenny-mcp-server.git
+# Clone
+git clone https://github.com/mythvv/jenny-mcp-server.git
 cd jenny-mcp-server
 
-# 2. Create virtual environment and install dependencies
-cd mcp-server
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# Start (auto-creates venv and installs dependencies)
+bash start.sh
 
-# Optional dependencies (install as needed)
-pip install httpx                # OpenCode toolkit
-pip install pandas matplotlib    # Data analysis toolkit
-pip install playwright aiohttp   # Web enhanced toolkit
-playwright install chromium      # Install browser
+# Default: 0.0.0.0:31415/mcp
+# Override with environment variables:
+MCP_HOST=127.0.0.1 MCP_PORT=8080 bash start.sh
 
-# 3. Create configuration file
-cp ../config/defaults.example.json ../config/defaults.json
-# Edit defaults.json with actual settings
+# Stop / Restart
+bash stop.sh
+bash restart.sh
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_HOST` | `0.0.0.0` | Server listen address |
+| `MCP_PORT` | `31415` | Server listen port |
+| `ALLOWED_HOSTS` | `127.0.0.1:*,localhost:*` | Comma-separated allowed host patterns |
+| `DROID_BIN` | `/root/.local/bin/droid` | Droid binary path |
+| `OPENCODE_BIN` | `/root/.opencode/bin/opencode` | OpenCode binary path |
+
+### Logging
+
+Logs are written to `logs/server.log` with automatic rotation:
+
+- **10MB** per file, **3** backups retained
+- Plugin lifecycle events (startup/shutdown/lease) are all logged
+
+```bash
+tail -f logs/server.log
+grep "\[lease\]" logs/server.log
 ```
 
 ## Usage
 
-### Starting the Server
+After connecting an MCP client:
 
-```bash
-cd mcp-server
-source .venv/bin/activate
+1. `toolkit_list` — List all available toolkits
+2. `toolkit_switch` — Switch to a target toolkit
+3. After switching, the toolkit's tools are auto-registered, or use `exec_tool` as a universal entry point
 
-# Default: 0.0.0.0:31415
-python server.py
-
-# Custom address
-python server.py --host 127.0.0.1 --port 8080
+```
+toolkit_list()                    → See available toolkits
+toolkit_switch("droid")           → Switch to Droid toolkit
+start_session()                   → Start a Droid session
+send_message(session_id, "...")   → Send a message
+toolkit_switch("data_analysis")   → Switch to data analysis
+csv_query(file_path="/tmp/data.csv", query="...")
 ```
 
-The server endpoint is `http://<host>:<port>/mcp` (Streamable HTTP transport).
+## Creating a Plugin
 
-### Client Configuration
+Drop a file or directory into `toolkits/plugins/` and restart. No framework changes needed.
 
-Add the following to your MCP client configuration:
+### Single-File Plugin
 
-```json
-{
-  "mcpServers": {
-    "jenny-tools": {
-      "url": "http://127.0.0.1:31415/mcp"
-    }
-  }
-}
-```
-
-### Shell Scripts (Droid Direct Interaction)
-
-```bash
-# Start a new session, returns session-id
-SESSION=$(./scripts/start.sh)
-echo "Session: $SESSION"
-
-# Send a message
-./scripts/send.sh "$SESSION" "Create a hello world Python script"
-
-# Poll output
-./scripts/poll.sh "$SESSION" 0    # Read from line 0
-
-# View all session statuses
-./scripts/status.sh
-
-# View a specific session
-./scripts/status.sh "$SESSION"
-```
-
-## API Reference
-
-### Common Tools
-
-These three tools are available regardless of which toolkit is active.
-
-#### `toolkit_list`
-
-List all available toolkits and their tools.
-
-**Parameters:** None
-
-**Response example:**
-
-```json
-{
-  "toolkits": {
-    "droid": { "description": "Factory Droid - File pipe mode", "tools": [...] },
-    "opencode": { "description": "OpenCode - HTTP API multi-turn session mode", "tools": [...] },
-    "data_analysis": { "description": "Data Analysis - CSV query/stats/visualization", "tools": [...] },
-    "web_enhanced": { "description": "Web Enhanced - JS rendered scraping", "tools": [...] }
-  }
-}
-```
-
-#### `toolkit_switch`
-
-Switch the active toolkit; tool list updates automatically.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `name` | string | ✅ | Toolkit name: `droid` / `opencode` / `data_analysis` / `web_enhanced` |
-| `config` | string | ❌ | JSON configuration parameters |
-
-**Config examples:**
-
-```jsonc
-// Droid
-{ "model": "custom:YOUR_MODEL", "auto_level": "high", "cwd": "/path/to/project" }
-
-// OpenCode
-{ "model": "opencode/big-pickle", "workdir": "/path/to/project" }
-```
-
-#### `toolkit_current`
-
-Display the current toolkit name and available tools.
-
----
-
-### 🤖 Droid Toolkit
-
-Interacts with [Factory Droid](https://docs.factory.ai/) via file pipe (`tail -f input.jsonl | droid exec`). Each session gets an independent directory, supporting multi-turn conversations.
-
-#### `start_session`
-
-Create a new Droid session.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `config` | object | ❌ | Override default settings (model, auto_level, cwd, etc.) |
-
-**Returns:** `{ "session_id": "uuid", "status": "started", "pid": 12345, "session_dir": "/path" }`
-
-#### `send_message`
-
-Send a message to a session.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `session_id` | string | ✅ | Session ID |
-| `message` | string | ✅ | Message content |
-
-#### `poll_output`
-
-Poll session output with incremental reading support.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `session_id` | string | ✅ | Session ID |
-| `last_line` | int | ❌ | Line number last read; only returns content after this line |
-
-**Returns:** `{ "lines": [...], "total_lines": 42 }`
-
-#### `check_status`
-
-Check session status.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `session_id` | string | ✅ | Session ID |
-
-#### `stop_session`
-
-Stop and clean up a session.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `session_id` | string | ✅ | Session ID |
-
-#### `exec_and_wait`
-
-All-in-one execution: create session → send message → wait for completion → return output.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `message` | string | ✅ | Message to execute |
-| `timeout` | int | ❌ | Timeout in seconds, default 900 (15 min) |
-| `config` | object | ❌ | Session configuration |
-
----
-
-### 🔮 OpenCode Toolkit
-
-Interacts with [OpenCode](https://opencode.ai/) via HTTP API. Automatically manages the lifecycle of the `opencode serve` process.
-
-#### `start_session`
-
-Start opencode serve and create a session. Auto-detects existing serve processes and starts one if needed.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `config` | object | ❌ | `model` (e.g. `"opencode/big-pickle"`), `workdir` |
-
-#### `send_message`
-
-Send a message to an OpenCode session.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `session_id` | string | ✅ | Session ID |
-| `message` | string | ✅ | Message content |
-
-#### `poll_output`
-
-Poll OpenCode session output.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `session_id` | string | ✅ | Session ID |
-| `last_line` | int | ❌ | Line number last read |
-
-#### `check_status`
-
-Check OpenCode session status.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `session_id` | string | ✅ | Session ID |
-
-#### `stop_session`
-
-Stop an OpenCode session.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `session_id` | string | ✅ | Session ID |
-
-#### `exec_and_wait`
-
-All-in-one OpenCode execution.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `message` | string | ✅ | Message to execute |
-| `timeout` | int | ❌ | Timeout in seconds |
-| `config` | object | ❌ | Session configuration |
-
-#### `cleanup`
-
-Clean up all stopped sessions and the serve process.
-
----
-
-### 📊 Data Analysis Toolkit
-
-CSV and JSON data analysis tools powered by Pandas and Matplotlib.
-
-#### `csv_info`
-
-Get basic information about a CSV file (columns, types, shape, preview).
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `file_path` | string | ✅ | CSV file path |
-| `preview_rows` | int | ❌ | Number of preview rows, default 5 |
-
-#### `csv_analyze`
-
-Statistical analysis of CSV data (describe, group by, etc.).
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `file_path` | string | ✅ | CSV file path |
-| `operation` | string | ❌ | Operation: `describe` / `groupby`, default `describe` |
-| `group_by` | string | ❌ | Group by column (required when operation is `groupby`) |
-| `agg_column` | string | ❌ | Column to aggregate (required when operation is `groupby`) |
-| `agg_func` | string | ❌ | Aggregation: `mean` / `sum` / `count` / `min` / `max`, default `mean` |
-
-#### `csv_query`
-
-Query CSV data using SQL-style expressions (based on Pandas DataFrame.query).
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `file_path` | string | ✅ | CSV file path |
-| `query` | string | ✅ | Query expression, e.g. `"age > 30 & city == 'Beijing'"` |
-| `columns` | string | ❌ | Columns to select, comma-separated, e.g. `"name,age,city"` |
-
-#### `csv_chart`
-
-CSV data visualization (generates chart and saves as PNG).
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `file_path` | string | ✅ | CSV file path |
-| `chart_type` | string | ✅ | Chart type: `line` / `bar` / `scatter` / `pie` |
-| `x_column` | string | ✅ | X-axis column name |
-| `y_column` | string | ✅ | Y-axis column name (value column for pie charts) |
-| `title` | string | ❌ | Chart title |
-
-**Returns:** `{ "chart_path": "/tmp/data_analysis_charts/chart_xxx.png", "data_points": 100 }`
-
-#### `json_query`
-
-JSON file path query.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `file_path` | string | ✅ | JSON file path |
-| `path` | string | ❌ | Query path, e.g. `users[0].name`, default `.` (root) |
-| `pretty` | bool | ❌ | Pretty-print output, default `true` |
-
----
-
-### 🌐 Web Enhanced Toolkit
-
-Advanced web scraping tools powered by Playwright + AIOHTTP.
-
-#### `web_fetch_js`
-
-Fetch page content after JavaScript rendering via Playwright.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `url` | string | ✅ | Target URL |
-| `selector` | string | ❌ | CSS selector, extract only matching elements |
-| `wait_for` | string | ❌ | Wait for selector to appear before fetching |
-| `timeout` | int | ❌ | Timeout in seconds, default 30 |
-| `use_cookies` | string | ❌ | Cookie file path (generated by web_login) |
-
-#### `web_batch_fetch`
-
-Batch concurrent fetching of multiple URLs.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `urls` | string | ✅ | URL list in JSON array format |
-| `max_concurrent` | int | ❌ | Max concurrency, default 5 |
-| `timeout` | int | ❌ | Timeout per request in seconds, default 30 |
-
-#### `web_search_enhanced`
-
-Enhanced search (supports time/site filtering, content extraction).
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `query` | string | ✅ | Search keywords |
-| `max_results` | int | ❌ | Max results, default 10 |
-| `time_range` | string | ❌ | Time range: `day` / `week` / `month` / `year` |
-| `site` | string | ❌ | Restrict to site, e.g. `github.com` |
-| `fetch_content` | bool | ❌ | Whether to fetch result page content, default `false` |
-
-#### `web_login`
-
-Browser login and save cookies.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `url` | string | ✅ | Login page URL |
-| `username_selector` | string | ✅ | Username input CSS selector |
-| `password_selector` | string | ✅ | Password input CSS selector |
-| `username` | string | ✅ | Username |
-| `password` | string | ✅ | Password |
-| `submit_selector` | string | ❌ | Submit button selector (press Enter if empty) |
-| `cookies_file` | string | ❌ | Cookie save path |
-| `wait_after_login` | int | ❌ | Seconds to wait after login, default 3 |
-| `verify_selector` | string | ❌ | Selector to verify successful login |
-
----
-
-## Configuration
-
-Copy the template and modify:
-
-```bash
-cp config/defaults.example.json config/defaults.json
-```
-
-`config/defaults.json`:
-
-```json
-{
-  "model": "custom:YOUR_MODEL_HERE",
-  "auto_level": "high",
-  "reasoning_effort": "none",
-  "interaction_mode": "auto",
-  "cwd": "/path/to/workspace",
-  "poll_interval_seconds": 30,
-  "max_wait_minutes": 15
-}
-```
-
-| Field | Description | Default |
-|-------|-------------|---------|
-| `model` | Model used by Droid | — |
-| `auto_level` | Auto execution level `low` / `medium` / `high` | `high` |
-| `reasoning_effort` | Reasoning intensity `none` / `low` / `medium` / `high` | `none` |
-| `interaction_mode` | Interaction mode | `auto` |
-| `cwd` | Agent working directory | Project workspace directory |
-| `poll_interval_seconds` | Polling interval | `30` |
-| `max_wait_minutes` | Maximum wait time | `15` |
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DROID_BIN` | Path to Droid CLI | `droid` |
-
-## Development
-
-### Adding a New Toolkit
-
-1. Create a new file under `mcp-server/toolkits/`, inheriting from `BaseToolkit`:
+`toolkits/plugins/my_tool.py`:
 
 ```python
-from .base import BaseToolkit
+from toolkits.base import BaseToolkit
 
-class MyToolkit(BaseToolkit):
-    name = "my_toolkit"
+class MyTool(BaseToolkit):
+    name = "my_tool"
     description = "My toolkit"
 
-    def get_config_schema(self) -> dict:
-        return {"key": "description"}
+    def __init__(self, ctx=None):
+        super().__init__()
 
-    def get_tools(self) -> list:
+    def get_config_schema(self):
+        return {}
+
+    def get_tools(self):
         return [
-            (self.my_tool, "my_tool", "Tool description"),
+            (self.hello, "hello",
+             "Returns a greeting",
+             [("name", "str", "World", "Name")]),
         ]
 
-    async def my_tool(self, param: str) -> dict:
-        return {"result": "..."}
+    async def hello(self, name="World"):
+        return {"message": f"Hello, {name}!"}
 ```
 
-2. Export it in `toolkits/__init__.py`
-3. Register it in `toolkits/manager.py`
-4. Add tool routing in `server.py` (using the `@_reg` decorator)
+### Package Plugin
 
-## License & Compliance
+For larger plugins with sub-modules:
 
-### This Project
+```
+plugins/my_tool/
+├── __init__.py    # Must export a BaseToolkit subclass
+├── core.py
+└── tables.py
+```
 
-Jenny MCP Server is released under the **MIT License** (see [LICENSE](./LICENSE)).
+### Key Interfaces
 
-### Third-Party Components
+| Method | Required | Description |
+|--------|----------|-------------|
+| `name` / `description` | Yes | Class attributes |
+| `get_config_schema()` | Yes | Return config description dict |
+| `get_tools()` | Yes | Return tool list |
+| `startup()` | No | Startup hook |
+| `shutdown()` | No | Shutdown hook (default: reclaim all Lease resources) |
 
-This tool server integrates with the following third-party tools via standard interfaces. These tools are **not included** in this project's distribution:
+#### Constructor `__init__(ctx)`
 
-| Component | License | Notes |
-|-----------|---------|-------|
-| [Factory Droid](https://docs.factory.ai/) | Proprietary (Source Available) | Integrated via `droid exec --input-format stream-jsonrpc` public CLI interface. Droid is a proprietary product of Factory AI, Copyright © 2025-2026 Factory AI. All rights reserved. |
-| [OpenCode](https://opencode.ai/) | MIT License | Integrated via `opencode serve` HTTP API. OpenCode is open-sourced under MIT. |
-| [FastMCP](https://github.com/modelcontextprotocol/python-sdk) | MIT License | MCP Protocol Python SDK |
-| [Playwright](https://playwright.dev/) | Apache 2.0 | Browser automation engine |
-| [Pandas](https://pandas.pydata.org/) | BSD 3-Clause | Data analysis library |
-| [Matplotlib](https://matplotlib.org/) | PSF License | Chart visualization library |
+Framework passes a `ctx` dict with `base_dir` (project root). **Must call `super().__init__()`** to initialize Lease mechanism.
 
-### Disclaimer
+```python
+def __init__(self, ctx=None):
+    super().__init__()
+    ctx = ctx or {}
+    base = ctx.get("base_dir", "/tmp")
+    self.data_dir = Path(base) / "my_tool_data"
+```
 
-- This project does **not distribute or embed** binaries or source code of Droid, OpenCode, or other third-party tools
-- Users must install and comply with each component's terms of use
-- This project is not affiliated with or endorsed by Factory AI, OpenCode, or any other third-party team
+#### `get_tools()` Format
+
+Each entry is a 4-tuple: `(method, tool_name, description, param_list)`
+
+```python
+def get_tools(self):
+    return [
+        (self.my_func, "my_func",
+         "Tool description",
+         [("param1", "str", None, "Required param"),
+          ("param2", "int", 10, "Optional param"),
+          ("param3", "Optional[str]", None, "Optional param")]),
+    ]
+```
+
+Supported type strings: `str`, `int`, `float`, `bool`, `Optional[str]`, `Optional[int]`, `Optional[float]`
+
+### Resource Lease Mechanism
+
+Built-in TTL-based resource reclamation for sessions, browsers, processes, etc.
+
+```
+Create  → _lease(key, ttl, cleanup_fn)   Register, start countdown
+Active  → _renew(key)                    Reset countdown
+Release → _release(key)                  Cancel countdown
+Expired → cleanup_fn() auto-executes     Reclaim resource
+Stop    → shutdown()                     Reclaim all active resources
+```
+
+**Usage:**
+
+```python
+async def start_session(self, ...):
+    self._lease(session_id, ttl=1800, lambda: asyncio.ensure_future(self.stop_session(session_id)))
+
+async def send_message(self, session_id, message):
+    self._renew(session_id)
+
+async def stop_session(self, session_id):
+    self._release(session_id)
+```
+
+**Existing Lease usage:**
+
+| Plugin | key | ttl | Cleanup |
+|--------|-----|-----|---------|
+| droid | session_id | 1800s | Kill idle session process |
+| opencode | "serve" | 1800s | Stop serve process when no sessions |
+| web_enhanced | "browser" | 600s | Close idle Playwright browser |
+
+## Design Principles
+
+- **server.py knows zero plugins** — No imports, no config reads, no directory creation for plugins
+- **manager.py is pure dispatch** — Only passes `base_dir`, never parses plugin configs
+- **Plugins are fully self-contained** — Each manages its own config, directories, and resource cleanup
+- **Resources reclaimed on demand** — Lease mechanism: no polling, no traversal, zero overhead when idle
+- **New plugin = new file** — No framework changes, no registries, restart to activate
+
+## License
+
+[MIT](./LICENSE)
