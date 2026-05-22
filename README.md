@@ -6,7 +6,7 @@
 
 > A plugin-based MCP tool server with dynamic toolkit switching, automatic discovery, and resource lease management.
 
-Jenny MCP Server is a tool server built on [FastMCP](https://github.com/modelcontextprotocol/python-sdk) that provides dynamically switchable toolkits for AI assistants. It wraps coding agents like Droid and OpenCode, along with data analysis, web scraping, and Chinese metaphysics (八字/奇门遁甲/紫微斗数/占星), as standard MCP tools — any MCP-compatible client can call them directly.
+Jenny MCP Server is a tool server built on [FastMCP](https://github.com/modelcontextprotocol/python-sdk) that provides dynamically switchable toolkits for AI assistants. It wraps coding agents like Droid and OpenCode, along with data analysis, web scraping, and Chinese Metaphysics (Bazi / Qi Men Dun Jia / Zi Wei Dou Shu / Western Astrology), as standard MCP tools — any MCP-compatible client can call them directly.
 
 ## ✨ Features
 
@@ -15,7 +15,7 @@ Jenny MCP Server is a tool server built on [FastMCP](https://github.com/modelcon
 - 🤖 **Multiple Coding Agents** — Supports [Factory Droid](https://docs.factory.ai/) (file pipe) and [OpenCode](https://opencode.ai/) (HTTP API)
 - 📊 **Data Analysis** — CSV query/stats/visualization, JSON path queries
 - 🌐 **Web Scraping** — JS-rendered fetching, batch concurrency, enhanced search, browser login
-- 🔮 **Chinese Metaphysics** — 八字命理 (Bazi), 奇门遁甲 (Qi Men), 紫微斗数 (Zi Wei), 西方占星 (Astrology)
+- 🔮 **Chinese Metaphysics** — Bazi (Four Pillars), Qi Men Dun Jia, Zi Wei Dou Shu, Western Astrology
 - ⏱ **Resource Lease** — Built-in TTL-based resource reclamation (sessions, browsers, processes)
 - 📜 **Zero Framework Knowledge** — `server.py` knows nothing about plugins; add new tools without touching the core
 
@@ -38,7 +38,7 @@ Jenny MCP Server is a tool server built on [FastMCP](https://github.com/modelcon
 │                        │ Dynamic switching             │
 │  ┌─────────┬──────────┼───────────┬────────────┬───────────────────┐  │
 │  │  Droid  │ OpenCode │DataAnalysis│WebEnhanced │  Chinese Meta.   │  │
-│  │ (pipe)  │(HTTP API)│(CSV/JSON) │(JS render) │八字/奇门/紫微/占星│  │
+│  │ (pipe)  │(HTTP API)│(CSV/JSON) │(JS render) │Bazi|QiMen|ZiWei|Astrology│  │
 │  └────┬────┴────┬─────┴─────┬─────┴──────┬─────┴────────┬─────────┘  │
 └───────┼─────────┼───────────┼────────────┼──────────────┼────────────┘
         │         │           │            │              │
@@ -68,9 +68,9 @@ jenny-mcp-server/
         ├── data_analysis.py    # CSV/JSON analysis + visualization
         ├── web_enhanced.py     # JS rendering / batch fetch / search / login
         ├── astrology.py        # Western astrology (Kerykeion)
-        ├── bazi2/              # 八字命理 (Bazi / Four Pillars)
-        ├── qimen2/             # 奇门遁甲 (Qi Men Dun Jia)
-        └── ziwei2/             # 紫微斗数 (Zi Wei Dou Shu)
+        ├── bazi2/              # Bazi (Four Pillars of Destiny)
+        ├── qimen2/             # Qi Men Dun Jia (Mystical Door Escaping Technique)
+        └── ziwei2/             # Zi Wei Dou Shu (Purple Star Astrology)
 
 # Auto-generated at runtime
 logs/                      # RotatingFileHandler (10MB per file, 3 backups)
@@ -132,10 +132,10 @@ start_session()                   → Start a Droid session
 send_message(session_id, "...")   → Send a message
 toolkit_switch("data_analysis")   → Switch to data analysis
 csv_query(file_path="/tmp/data.csv", query="...")
-toolkit_switch("bazi2")           → Switch to 八字命理
-toolkit_switch("qimen2")          → Switch to 奇门遁甲
-toolkit_switch("ziwei2")          → Switch to 紫微斗数
-toolkit_switch("astrology")       → Switch to 西方占星
+toolkit_switch("bazi2")           → Switch to Bazi
+toolkit_switch("qimen2")          → Switch to Qi Men Dun Jia
+toolkit_switch("ziwei2")          → Switch to Zi Wei Dou Shu
+toolkit_switch("astrology")       → Switch to Western Astrology
 ```
 
 ## Creating a Plugin
