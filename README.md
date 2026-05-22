@@ -1,6 +1,6 @@
 # Jenny MCP Server
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
 [![Python ≥3.11](https://img.shields.io/badge/Python-%E2%89%A53.11-blue.svg)](https://www.python.org/)
 [![MCP Protocol](https://img.shields.io/badge/MCP-Protocol-green.svg)](https://modelcontextprotocol.io/)
 
@@ -263,4 +263,4 @@ async def stop_session(self, session_id):
 
 ## License
 
-[MIT](./LICENSE)
+[AGPL-3.0](./LICENSE)
