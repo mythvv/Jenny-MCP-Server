@@ -58,6 +58,7 @@ rpds-py==0.30.0
 scour==0.38.2
 simple-ascii-tables==1.0.1
 six==1.17.0
+sxtwl==2.0.7
 sse-starlette==3.4.4
 starlette==1.0.0
 typing-inspection==0.4.2

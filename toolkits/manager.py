@@ -63,7 +63,8 @@ class ToolkitManager:
 
     def __init__(self, base_dir: str):
         self._toolkits: dict[str, BaseToolkit] = {}
-        self._current: Optional[str] = None
+        # NOTE: per-session state removed — toolkit switching is now handled
+        # by FastMCP Context (get_state/set_state/enable_components/disable_components)
         self._base_dir = Path(base_dir)
 
         ctx = {"base_dir": str(self._base_dir)}
@@ -104,44 +105,6 @@ class ToolkitManager:
     def list_toolkits(self) -> list[dict]:
         return [t.get_info() for t in self._toolkits.values()]
 
-    def switch(self, name: str, config: dict) -> dict:
-        if name not in self._toolkits:
-            return {
-                "error": f"Toolkit {name} not found",
-                "available": list(self._toolkits.keys()),
-            }
-
-        old = self._current
-        self._current = name
-        toolkit = self._toolkits[name]
-
-        result = {
-            "status": "switched",
-            "from": old,
-            "to": name,
-            "toolkit": toolkit.get_info(),
-            "tools_schema": toolkit._build_tools_schema(),
-        }
-
-        if config:
-            result["config_applied"] = config
-
-        return result
-
-    def current(self) -> dict:
-        if self._current is None:
-            return {
-                "current": None,
-                "toolkit": None,
-                "hint": "Use toolkit_switch to switch to a target toolkit",
-            }
-        toolkit = self._toolkits[self._current]
-        return {
-            "current": self._current,
-            "toolkit": toolkit.get_info(),
-        }
-
-    def get(self) -> Optional[BaseToolkit]:
-        if self._current is None:
-            return None
-        return self._toolkits[self._current]
+    # ── Legacy per-session methods (removed) ──────────────────
+    # switch(), current(), get() — now handled by FastMCP Context
+    # in server.py: toolkit_switch / toolkit_current tools

@@ -443,6 +443,20 @@ def get_tools(self):
 
 Supported type strings: `str`, `int`, `float`, `bool`, `Optional[str]`, `Optional[int]`, `Optional[float]`
 
+### Duplicate Tool Name Resolution
+
+When two or more toolkits expose a tool with the same name (e.g. both `droid` and `opencode` have `start_session`), the server automatically prefixes the MCP-registered name with the toolkit name:
+
+| Toolkit | Original Name | Registered MCP Name |
+|---------|--------------|-------------------|
+| droid | `start_session` | `droid__start_session` |
+| opencode | `start_session` | `opencode__start_session` |
+
+Non-duplicated names are registered as-is. This is handled by `_registered_name()` and `_DUPES` — computed once at startup via `_detect_duplicate_names()`.
+
+> **Plugin authors**: you do not need to do anything special. Just pick a descriptive name for your tools; the server handles conflicts automatically.
+
+
 ### Resource Lease Mechanism
 
 Built-in TTL-based resource reclamation for sessions, browsers, processes, etc.

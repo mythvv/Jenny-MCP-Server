@@ -1,102 +1,141 @@
-# 贡献指南
+# Contributing Guide
 
-感谢你对 Jenny MCP Server 的关注！欢迎提交 Issue 和 Pull Request。
+Thank you for your interest in Jenny MCP Server! We welcome Issues and Pull Requests.
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 1. Fork 并克隆
+# 1. Fork and clone
 git clone https://github.com/your-username/jenny-mcp-server.git
 cd jenny-mcp-server
 
-# 2. 创建虚拟环境
-python -m venv .venv
+# 2. Create virtual environment
+python3 -m venv .venv
 source .venv/bin/activate
 
-# 3. 安装开发依赖
-pip install -e ".[dev,all]"
+# 3. Install dependencies
+pip install -r requirements.txt
 
-# 4. 安装 Playwright 浏览器（如需 web-enhanced）
-playwright install chromium
+# 4. Install Playwright browser (optional, for web-enhanced toolkit)
+.venv/bin/playwright install chromium
 
-# 5. 配置
-cp config/defaults.example.json config/defaults.json
-# 编辑 defaults.json
-
-# 6. 启动测试
-python mcp-server/server.py
+# 5. Start the server
+bash start.sh
 ```
 
-## 开发流程
+## Development Flow
 
-### 分支管理
+### Branch Management
 
-- `main` — 稳定发布分支
-- `dev` — 开发集成分支
-- 功能分支：`feat/your-feature`
-- 修复分支：`fix/your-fix`
+- `main` — stable release branch
+- `dev` — development integration branch
+- Feature branches: `feat/your-feature`
+- Fix branches: `fix/your-fix`
 
-### 提交信息
+### Commit Messages
 
-遵循 [Conventional Commits](https://www.conventionalcommits.org/)：
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
-feat: 添加 xxx 工具包
-fix: 修复会话超时不生效的问题
-docs: 更新 API 文档
-refactor: 重构工具注册机制
-test: 添加 droid 工具包单元测试
-chore: 更新依赖版本
+feat: add xxx toolkit
+fix: fix session timeout not working
+docs: update API documentation
+refactor: refactor tool registration mechanism
+chore: update dependency versions
 ```
 
-### 代码规范
+### Code Style
 
-- 使用 `ruff` 进行 lint：`ruff check .`
-- 使用 `ruff format` 格式化代码
-- 类型注解：公共 API 必须添加类型注解
-- 文档字符串：所有工具函数必须包含 docstring
+- Lint: `ruff check .`
+- Format: `ruff format`
+- Type annotations required on public APIs
+- Docstrings required on all tool functions
 
-### 测试
+## Adding a New Toolkit
 
-```bash
-# 运行全部测试
-pytest
+### Plugin Auto-Discovery
 
-# 运行特定模块
-pytest tests/test_droid.py
+Toolkits placed in `toolkits/plugins/` are auto-discovered at startup — no registration code needed.
 
-# 带覆盖率
-pytest --cov=mcp_server
+### Step-by-step
+
+1. Create a new `.py` file or package under `toolkits/plugins/`
+2. Inherit from `BaseToolkit` and implement `get_tools()`:
+
+```python
+from toolkits.base import BaseToolkit
+
+class MyToolkit(BaseToolkit):
+    name = "my_toolkit"
+
+    def get_tools(self):
+        return [
+            (self.my_func, "my_func",
+             "Description of what this tool does",
+             [("param1", "str", None, "Required parameter"),
+              ("param2", "int", 10, "Optional parameter with default"),
+              ("param3", "Optional[str]", None, "Truly optional parameter")]),
+        ]
+
+    async def my_func(self, param1: str, param2: int = 10, param3: str = None):
+        """Tool implementation."""
+        return {"result": param1}
 ```
 
-## 添加新工具包
+3. Restart the server — the plugin is loaded and its tools are registered automatically.
 
-详见 README 中的「开发 → 添加新工具包」章节。简要步骤：
+### How Registration Works Internally
 
-1. 在 `mcp-server/toolkits/` 下创建文件，继承 `BaseToolkit`
-2. 实现 `get_tools()` 返回工具列表
-3. 在 `__init__.py` 导出、`manager.py` 注册
-4. 在 `server.py` 添加路由（`@_reg` 装饰器）
-5. 更新 README API 文档
-6. 添加测试
+You do **not** need to modify `server.py` or `manager.py`. The startup sequence:
 
-## Pull Request 流程
+1. `ToolkitManager` discovers all `BaseToolkit` subclasses in `toolkits/plugins/`
+2. Each toolkit's `get_tools()` builds `_TOOL_REGISTRY` (a dict of toolkit name → tool map)
+3. `_register_all_tools_static()` registers all tools as MCP tools with tags
+4. Tools with **duplicate names across toolkits** are auto-prefixed (e.g. `droid__start_session`)
+5. All toolkit tools start **disabled**; clients call `toolkit_switch` to enable them per-session
 
-1. 确保通过所有测试：`pytest`
-2. 确保代码规范：`ruff check .`
-3. 更新相关文档（README、CHANGELOG）
-4. 提交 PR，描述改动内容和动机
-5. 等待 review
+Supported type strings: `str`, `int`, `float`, `bool`, `Optional[str]`, `Optional[int]`, `Optional[float]`
 
-## Issue 报告
+### Resource Lease Mechanism
 
-提交 Issue 时请包含：
+For toolkits that manage resources (sessions, browsers, processes), use the built-in TTL-based lease:
 
-- **环境信息**：Python 版本、OS、相关工具版本
-- **复现步骤**：最小可复现的步骤
-- **预期行为** vs **实际行为**
-- **日志**：相关错误日志（注意移除敏感信息）
+```python
+async def start_session(self, ...):
+    self._lease(session_id, ttl=1800,
+                lambda: asyncio.ensure_future(self.stop_session(session_id)))
 
-## 许可证
+async def send_message(self, session_id, message):
+    self._renew(session_id)  # reset TTL countdown
 
-提交代码即表示你同意以 MIT 许可证发布你的贡献。
+async def stop_session(self, session_id):
+    self._release(session_id)
+```
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `start.sh` | Start server (reads `.env` for `MCP_PASSWORD`, `MCP_HOST`, `MCP_PORT`) |
+| `stop.sh` | Graceful stop with fallback to force-kill |
+| `restart.sh` | Stop then start |
+
+## Pull Request Process
+
+1. Ensure code style: `ruff check .`
+2. Update relevant documentation (README, CHANGELOG)
+3. Submit a PR describing changes and motivation
+4. Wait for review
+
+## Issue Reports
+
+Please include:
+
+- **Environment**: Python version, OS, relevant tool versions
+- **Reproduction steps**: Minimal reproducible steps
+- **Expected vs actual behavior**
+- **Logs**: Relevant error output (remove sensitive information first)
+
+## License
+
+By submitting code, you agree to license your contributions under [AGPL-3.0](./LICENSE).

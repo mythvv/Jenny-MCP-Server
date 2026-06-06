@@ -7,7 +7,9 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
+from fastmcp.server.context import Context
+from fastmcp.dependencies import CurrentContext
 
 from toolkits import ToolkitManager
 from toolkits.base import BaseToolkit
@@ -32,7 +34,7 @@ logging.getLogger("toolkits").setLevel(logging.DEBUG)
 
 log = logging.getLogger("mcp-server")
 
-mcp = FastMCP("tools", json_response=True)
+mcp = FastMCP("tools")
 
 # ── Auth middleware ──────────────────────────────────────────────
 MCP_PASSWORD = os.environ.get("MCP_PASSWORD", "")
@@ -50,12 +52,10 @@ class _AuthHeaders:
             await self.app(scope, receive, send)
             return
 
-        # No password configured → skip auth
         if not MCP_PASSWORD:
             await self.app(scope, receive, send)
             return
 
-        # Extract headers from ASGI scope
         headers = dict(scope.get("headers", []))
         auth_header = headers.get(b"authorization", b"").decode("utf-8", errors="replace")
 
@@ -83,153 +83,138 @@ async def _send_json(send, status: int, body: dict):
     })
     await send({"type": "http.response.body", "body": raw})
 
-from mcp.server.transport_security import TransportSecuritySettings
 
-mcp.settings.transport_security = TransportSecuritySettings(
-    enable_dns_rebinding_protection=False,
-    allowed_hosts=["10.1.*.*", "192.168.*.*", "127.0.0.1:*", "localhost:*"],
-    allowed_origins=[
-        "http://10.1.*.*",
-        "http://192.168.*.*",
-        "http://127.0.0.1:*",
-        "http://localhost:*",
-    ],
-)
+# ── Toolkit Registry ────────────────────────────────────────────
+toolkit_manager = ToolkitManager(str(PROJECT_DIR))
 
-toolkit_manager = ToolkitManager(base_dir=str(PROJECT_DIR))
-log.info("base_dir=%s", PROJECT_DIR)
+# All toolkit tools are indexed by (toolkit_name, tool_name) → handler
+_TOOL_REGISTRY: dict[str, dict[str, tuple]] = {}  # toolkit_name → {tool_name: (handler, desc, params)}
 
-COMMON_TOOLS = {"toolkit_list", "toolkit_switch", "toolkit_current"}
-
-_registered_tools: set[str] = set()
-
-TYPE_MAP = {
-    "str": str,
-    "int": int,
-    "bool": bool,
-    "float": float,
-    "Optional[str]": Optional[str],
-    "Optional[int]": Optional[int],
-    "Optional[float]": Optional[float],
-}
-
-_TOOL_REGISTRY: dict[str, dict[str, tuple]] = {}
+COMMON_TOOLS = {"toolkit_list", "toolkit_switch", "toolkit_current", "exec_tool"}
 
 
-def _unregister_toolkit_tools():
-    tm = mcp._tool_manager
-    for name in list(_registered_tools):
-        try:
-            if name in tm._tools:
-                tm.remove_tool(name)
-        except Exception:
-            pass
-    _registered_tools.clear()
+def _build_tool_registry():
+    """Build the handler registry from all discovered toolkits."""
+    for tk_name, tk in toolkit_manager._toolkits.items():
+        tools = {}
+        for entry in tk.get_tools():
+            fn, name, desc = entry[0], entry[1], entry[2]
+            params = entry[3] if len(entry) > 3 else None
+            tools[name] = (fn, desc, params)
+        _TOOL_REGISTRY[tk_name] = tools
 
 
-def _auto_discover_tools():
-    for tk_name, tk_instance in toolkit_manager._toolkits.items():
-        if tk_name in _TOOL_REGISTRY:
-            continue
-        for entry in tk_instance.get_tools():
-            fn, tool_name, desc = entry[0], entry[1], entry[2]
-            params = entry[3] if len(entry) > 3 else BaseToolkit._extract_params(fn)
-            _TOOL_REGISTRY.setdefault(tk_name, {})[tool_name] = (fn, desc, params)
+# Duplicate tool names across toolkits (computed once at startup)
+_DUPES: set[str] = set()
 
 
-def _get_tools_schema(toolkit_name: str) -> list[dict]:
-    tools = _TOOL_REGISTRY.get(toolkit_name, {})
-    schemas = []
-    for name, (handler, description, params) in tools.items():
-        param_schemas = []
-        for pname, ptype_str, pdefault, pdoc in params:
-            param_schemas.append(
-                {"name": pname, "type": ptype_str, "description": pdoc}
-            )
-        schemas.append({"name": name, "description": description, "parameters": param_schemas})
-    return schemas
+def _detect_duplicate_names():
+    """Compute tool names that appear in more than one toolkit. Call once after _build_tool_registry()."""
+    from collections import Counter
+    name_counts: Counter[str] = Counter()
+    for tools in _TOOL_REGISTRY.values():
+        for tool_name in tools:
+            name_counts[tool_name] += 1
+    _DUPES.update(name for name, cnt in name_counts.items() if cnt > 1)
+    if _DUPES:
+        log.info("duplicate tool names detected (will be prefixed): %s", sorted(_DUPES))
 
 
-def _register_toolkit_tools(toolkit_name: str):
-    tm = mcp._tool_manager
-    tools = _TOOL_REGISTRY.get(toolkit_name, {})
+def _register_all_tools_static():
+    """Register all toolkit tools as MCP tools with tags, then globally disable them."""
+    for tk_name, tools in _TOOL_REGISTRY.items():
+        tag = f"toolkit:{tk_name}"
+        for tool_name, (handler, desc, params) in tools.items():
+            # Create a wrapper that dispatches to the correct handler
+            _register_single_tool(tk_name, tool_name, handler, desc, params, tag)
 
-    for name, (handler, description, params) in tools.items():
-        try:
-            if name in tm._tools:
-                tm.remove_tool(name)
-        except Exception:
-            pass
-
-        def _bind(fn):
-            async def wrapper(**kwargs):
-                return json.dumps(await fn(**kwargs))
-            return wrapper
-
-        wrapper = _bind(handler)
-
-        sig_params = []
-        for pname, ptype_str, pdefault, _pdoc in params:
-            ann = TYPE_MAP.get(ptype_str, str)
-            if pdefault is None and not ptype_str.startswith("Optional"):
-                p = inspect.Parameter(
-                    pname, inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=ann
-                )
-            else:
-                p = inspect.Parameter(
-                    pname, inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    default=pdefault, annotation=ann,
-                )
-            sig_params.append(p)
-
-        has_default = False
-        fixed_params = []
-        for p in sig_params:
-            if p.default is not inspect.Parameter.empty:
-                has_default = True
-            elif has_default:
-                p = p.replace(default=None)
-            fixed_params.append(p)
-
-        wrapper.__signature__ = inspect.Signature(fixed_params)
-        param_docs = "\n".join(f"        {p[0]}: {p[3]}" for p in params)
-        wrapper.__doc__ = f"{description}\n\nArgs:\n{param_docs}" if params else description
-        wrapper.__name__ = name
-
-        tm.add_tool(wrapper, name=name, description=wrapper.__doc__)
-        _registered_tools.add(name)
+    # Globally disable all toolkit tools — they'll be enabled per-session
+    for tk_name in _TOOL_REGISTRY:
+        mcp.disable(tags={f"toolkit:{tk_name}"})
 
 
-@mcp.tool()
-async def exec_tool(name: str, params: str = "{}") -> str:
-    """Execute any tool in the current toolkit. Use after toolkit_switch when new tools are not yet in the tool list."""
-    toolkit_name = toolkit_manager._current
+def _registered_name(tk_name: str, tool_name: str) -> str:
+    """Return the MCP-registered tool name (with prefix if duplicated across toolkits)."""
+    return f"{tk_name}__{tool_name}" if tool_name in _DUPES else tool_name
 
-    if toolkit_name is None:
-        return json.dumps({
-            "error": "No toolkit selected, use toolkit_switch first",
-            "available_toolkits": list(toolkit_manager._toolkits.keys()),
-        })
 
-    tools = _TOOL_REGISTRY.get(toolkit_name, {})
+def _tool_list_for_toolkit(tk_name: str) -> list[str]:
+    """Return list of MCP-registered names for a toolkit's tools (plus common tools)."""
+    names = [_registered_name(tk_name, n) for n in _TOOL_REGISTRY[tk_name]]
+    return sorted(set(names) | COMMON_TOOLS)
 
-    if name not in tools:
-        return json.dumps({
-            "error": f"Tool '{name}' not found in toolkit '{toolkit_name}'",
-            "available_tools": list(tools.keys()),
-        })
 
-    handler, _, _ = tools[name]
+def _register_single_tool(tk_name: str, tool_name: str, handler, desc: str, params, tag: str):
+    """Register a single toolkit tool with the MCP server."""
+    # For duplicate names across toolkits, prefix with toolkit name
+    reg_name = f"{tk_name}__{tool_name}" if tool_name in _DUPES else tool_name
 
-    try:
-        args = json.loads(params) if isinstance(params, str) else params
-        result = await handler(**args)
-        return json.dumps(result)
-    except json.JSONDecodeError as e:
-        return json.dumps({"error": f"Invalid JSON params: {e}"})
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+    # Build parameter info for the wrapper function signature
+    if params is None:
+        params = BaseToolkit._extract_params(handler)
 
+    # Create dynamic wrapper with proper signature
+    sig_params = []
+    defaults = {}
+    annotations = {}
+    for pname, ptype, pdefault, pdesc in params:
+        sig_params.append(pname)
+        if pdefault is not None:
+            defaults[pname] = pdefault
+        # Map type strings to actual Python types
+        type_map = {
+            "str": str, "int": int, "float": float, "bool": bool,
+            "Optional[str]": Optional[str], "Optional[int]": Optional[int],
+            "Optional[float]": Optional[float],
+        }
+        annotations[pname] = type_map.get(ptype, str)
+
+    # Build the wrapper function dynamically
+    import functools
+
+    _tk_name = tk_name
+    _tool_name = tool_name
+    _handler = handler
+
+    async def _wrapper(*args, **kwargs):
+        # Call the original handler
+        result = _handler(**kwargs)
+        if inspect.iscoroutine(result):
+            result = await result
+        if isinstance(result, (dict, list)):
+            return json.dumps(result, ensure_ascii=False)
+        return result
+
+    # Set up the function signature for MCP introspection
+    from inspect import Parameter, Signature
+
+    # Build params: required first, then optional (avoids "non-default follows default" error)
+    sig_params_obj = []
+    optional_params = []
+    for pname in sig_params:
+        p = Parameter(
+            pname,
+            Parameter.POSITIONAL_OR_KEYWORD,
+            default=defaults.get(pname, Parameter.empty),
+            annotation=annotations.get(pname, Parameter.empty),
+        )
+        if defaults.get(pname, Parameter.empty) is Parameter.empty:
+            sig_params_obj.append(p)
+        else:
+            optional_params.append(p)
+    sig_params_obj.extend(optional_params)
+
+    _wrapper.__signature__ = Signature(sig_params_obj)
+    _wrapper.__annotations__ = annotations
+    _wrapper.__name__ = reg_name
+    _wrapper.__qualname__ = reg_name
+    _wrapper.__doc__ = desc
+
+    # Register with MCP using tags for per-session visibility
+    mcp.tool(name=reg_name, description=desc, tags={tag})(_wrapper)
+
+
+# ── Common Tools ────────────────────────────────────────────────
 
 @mcp.tool()
 def toolkit_list() -> str:
@@ -238,33 +223,127 @@ def toolkit_list() -> str:
 
 
 @mcp.tool()
-def toolkit_switch(name: str, config: str = "{}") -> str:
+async def toolkit_switch(name: str, config: str = "{}", ctx: Context = CurrentContext()) -> str:
     """Switch to a toolkit. Tool list updates automatically after switching."""
     try:
         cfg = json.loads(config) if isinstance(config, str) else config
     except json.JSONDecodeError:
         cfg = {}
 
-    _unregister_toolkit_tools()
-    result = toolkit_manager.switch(name, cfg)
-    _register_toolkit_tools(name)
+    if name not in _TOOL_REGISTRY:
+        return json.dumps({
+            "error": f"Toolkit '{name}' not found",
+            "available": list(_TOOL_REGISTRY.keys()),
+        })
 
-    result["available_tools"] = sorted(_registered_tools | COMMON_TOOLS)
-    result["tools_schema"] = _get_tools_schema(name)
-    return json.dumps(result)
+    # Per-session: disable old toolkit, enable new one
+    old = await ctx.get_state("current_toolkit")
+    if old and old != name:
+        await ctx.disable_components(tags={f"toolkit:{old}"})
+    await ctx.enable_components(tags={f"toolkit:{name}"})
+    await ctx.set_state("current_toolkit", name)
+
+    # Build result info from registry
+    tk = toolkit_manager._toolkits[name]
+    tools_schema = tk._build_tools_schema()
+    available_tools = _tool_list_for_toolkit(name)
+
+    result = {
+        "status": "switched",
+        "from": old,
+        "to": name,
+        "toolkit": tk.get_info(),
+        "available_tools": available_tools,
+        "tools_schema": tools_schema,
+    }
+
+    if cfg:
+        result["config_applied"] = cfg
+
+    return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
-def toolkit_current() -> str:
+async def toolkit_current(ctx: Context = CurrentContext()) -> str:
     """Show the current toolkit."""
-    info = toolkit_manager.current()
-    info["available_tools"] = sorted(_registered_tools | COMMON_TOOLS)
-    return json.dumps(info)
+    current_name = await ctx.get_state("current_toolkit")
+
+    if not current_name:
+        return json.dumps({
+            "current": None,
+            "toolkit": None,
+            "hint": "Use toolkit_switch to switch to a target toolkit",
+        })
+
+    tk = toolkit_manager._toolkits.get(current_name)
+    if not tk:
+        return json.dumps({
+            "current": None,
+            "error": f"Previously active toolkit '{current_name}' not found",
+        })
+
+    info = {
+        "current": current_name,
+        "toolkit": tk.get_info(),
+        "available_tools": _tool_list_for_toolkit(current_name),
+    }
+    return json.dumps(info, ensure_ascii=False)
 
 
-_auto_discover_tools()
+@mcp.tool()
+async def exec_tool(name: str, params: str = "{}", ctx: Context = CurrentContext()) -> str:
+    """Execute a tool in the current toolkit. Pass the tool name and parameters as JSON."""
+    # Find which toolkit is active for this session
+    toolkit_name = await ctx.get_state("current_toolkit")
+
+    if not toolkit_name or toolkit_name not in _TOOL_REGISTRY:
+        return json.dumps({
+            "error": "No active toolkit. Use toolkit_switch first.",
+        })
+
+    tools = _TOOL_REGISTRY[toolkit_name]
+
+    # Accept both raw name and prefixed name (e.g. "start_session" or "droid__start_session")
+    resolved = name
+    if name not in tools:
+        # Try stripping the toolkit prefix
+        prefix = f"{toolkit_name}__"
+        if name.startswith(prefix):
+            resolved = name[len(prefix):]
+
+    if resolved not in tools:
+        return json.dumps({
+            "error": f"Tool '{name}' not found in toolkit '{toolkit_name}'",
+            "available_tools": list(tools.keys()),
+        })
+
+    handler, _, _ = tools[resolved]
+
+    try:
+        args = json.loads(params) if isinstance(params, str) else params
+        result = handler(**args)
+        if inspect.iscoroutine(result):
+            result = await result
+        if isinstance(result, (dict, list)):
+            return json.dumps(result, ensure_ascii=False)
+        return result
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid JSON params: {e}"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ── Startup ─────────────────────────────────────────────────────
+
+_build_tool_registry()
+_detect_duplicate_names()
+_register_all_tools_static()
 toolkit_manager.startup_all()
-log.info("startup complete, %d toolkits, %d tools", len(toolkit_manager._toolkits), sum(len(v) for v in _TOOL_REGISTRY.values()))
+log.info("startup complete, %d toolkits, %d tools registered",
+         len(toolkit_manager._toolkits), sum(len(v) for v in _TOOL_REGISTRY.values()))
+
+# ── Top-level ASGI app (for import by external runners / tests) ──
+app = mcp.http_app(path="/mcp", json_response=True)
 
 
 def _shutdown():
@@ -280,7 +359,8 @@ import signal as _signal
 _signal.signal(_signal.SIGTERM, lambda *_: (_shutdown(), exit(0)))
 
 
-if __name__ == "__main__":
+def main():
+    """CLI entry point."""
     import argparse
     import uvicorn
 
@@ -289,14 +369,15 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=31415)
     args = parser.parse_args()
 
-    mcp.settings.host = args.host
-    mcp.settings.port = args.port
-    mcp.settings.streamable_http_path = "/mcp"
+    # Build Starlette app with auth middleware if password is set
+    middleware = [(_AuthHeaders, (), {})] if MCP_PASSWORD else None
+    app = mcp.http_app(path="/mcp", middleware=middleware, json_response=True)
 
-    # Build Starlette app and mount auth middleware if password is set
-    app = mcp.streamable_http_app()
     if MCP_PASSWORD:
-        app.add_middleware(_AuthHeaders)
         log.info("Auth middleware mounted")
 
     uvicorn.run(app, host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()
