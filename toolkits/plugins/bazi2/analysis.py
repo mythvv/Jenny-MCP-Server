@@ -134,9 +134,9 @@ def liunian_analysis(birth_date: str, birth_time: str, gender: str = "男",
             current_dy_gz = dy.getGanZhi()
 
     # 流年干支
-    solar_ly = Solar.fromYmd(target_year, 1, 1)
+    solar_ly = Solar.fromYmd(target_year, 2, 5)
     lunar_ly = solar_ly.getLunar()
-    ly_ganzhi = lunar_ly.getYearInGanZhi()
+    ly_ganzhi = lunar_ly.getYearInGanZhiByLiChun()
     ly_gan = ly_ganzhi[0]
     ly_zhi = ly_ganzhi[1]
     ly_elem = Tr.element_cn(ly_gan)
@@ -204,9 +204,9 @@ def liuyue_analysis(birth_date: str, birth_time: str, gender: str = "男",
             current_dy_gz = dy.getGanZhi()
 
     # 流年干支
-    solar_ly = Solar.fromYmd(target_year, 1, 1)
+    solar_ly = Solar.fromYmd(target_year, 2, 5)
     lunar_ly = solar_ly.getLunar()
-    ly_ganzhi = lunar_ly.getYearInGanZhi()
+    ly_ganzhi = lunar_ly.getYearInGanZhiByLiChun()
 
     return {
         "birth_date": birth_date,
