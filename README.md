@@ -8,6 +8,20 @@
 
 Jenny MCP Server is a tool server built on [FastMCP](https://github.com/modelcontextprotocol/python-sdk) that provides dynamically switchable toolkits for AI assistants. It wraps coding agents like Droid and OpenCode, along with data analysis, web scraping, and Chinese Metaphysics (Bazi / Qi Men Dun Jia / Zi Wei Dou Shu / Western Astrology), as standard MCP tools — any MCP-compatible client can call them directly.
 
+## Table of Contents
+
+- [Features](#%E2%9C%A8-features)
+- [Architecture](#architecture)
+- [Directory Structure](#directory-structure)
+- [Quick Start](#quick-start)
+- [Password Authentication](#%E2%9C%85-password-authentication)
+- [Client Configuration](#-client-configuration)
+- [Usage](#usage)
+- [Plugin Toolkit Reference](#%E2%9C%A8-plugin-toolkit-reference)
+- [Creating a Plugin](#creating-a-plugin)
+- [Design Principles](#design-principles)
+- [License](#license)
+
 ## ✨ Features
 
 - 🔄 **Dynamic Toolkit Switching** — Switch toolkits at runtime; tool lists update automatically
@@ -22,58 +36,54 @@ Jenny MCP Server is a tool server built on [FastMCP](https://github.com/modelcon
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                  MCP Client (any)                     │
-│          Claude / Jenny / Cursor / ...                │
-└──────────────────────┬───────────────────────────────┘
-                       │ MCP (Streamable HTTP)
-                       │ :31415/mcp
-┌──────────────────────▼───────────────────────────────┐
-│                  MCP Server (FastMCP)                  │
-│  ┌─────────────────────────────────────────────────┐  │
-│  │           Common Tools (always visible)          │  │
-│  │   toolkit_list / toolkit_switch / toolkit_current│  │
-│  │              exec_tool (universal entry)         │  │
-│  └─────────────────────┬───────────────────────────┘  │
-│                        │ Dynamic switching             │
-│  ┌─────────┬──────────┼───────────┬────────────┬───────────────────┐  │
-│  │  Droid  │ OpenCode │DataAnalysis│WebEnhanced │  Chinese Meta.   │  │
-│  │ (pipe)  │(HTTP API)│(CSV/JSON) │(JS render) │Bazi|QiMen|ZiWei|Astrology│  │
-│  └────┬────┴────┬─────┴─────┬─────┴──────┬─────┴────────┬─────────┘  │
-└───────┼─────────┼───────────┼────────────┼──────────────┼────────────┘
-        │         │           │            │              │
-   ┌────▼───┐┌───▼────┐┌────▼───┐┌────▼─────┐┌──────────▼─────────┐
-   │  Droid ││OpenCode││Pandas  ││Playwright││lunar_python+ephem  │
-   │  CLI   ││ Serve  ││+Mpl    ││ +AIOHTTP ││+kerykeion+sxtwl   │
-   └────────┘└────────┘└────────┘└──────────┘└────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                       MCP Client (any)                              │
+│            Claude / Jenny / Cursor / ...                            │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ MCP (Streamable HTTP)
+                                │ :31415/mcp
+┌───────────────────────────────▼─────────────────────────────────────┐
+│                       MCP Server (FastMCP)                          │
+│ ┌─────────────────────────────────────────────────────────────────┐ │
+│ │              Common Tools (always visible)                      │ │
+│ │   toolkit_list / toolkit_switch / toolkit_current               │ │
+│ │              exec_tool (universal entry)                        │ │
+│ └──────────────────────────┬──────────────────────────────────────┘ │
+│                            │ Dynamic switching                      │
+│ ┌──────────┬──────────┬────┴───────────┬──────────┬───────────────┐ │
+│ │  Droid   │ OpenCode │ DataAnalysis   │ Web      │ Chinese Meta. │ │
+│ │  (pipe)  │(HTTP API)│ (CSV/JSON)     │ Enhanced │ Bazi|QiMen    │ │
+│ │          │          │                │(JS render│ |ZiWei|Astro   │ │
+│ └────┬─────┴────┬─────┴──────┬────────┴─────┬────┴───────┬───────┘ │
+└──────┼──────────┼────────────┼──────────────┼────────────┼─────────┘
+       │          │            │              │            │
+  ┌────▼────┐┌────▼────┐┌─────▼────┐┌───────▼──────┐┌────▼──────────┐
+  │  Droid  ││OpenCode ││ Pandas   ││  Playwright   ││lunar_python   │
+  │   CLI   ││  Serve  ││ + Mpl    ││ + AIOHTTP     ││+ephem+kerykeion│
+  └─────────┘└─────────┘└──────────┘└───────────────┘└───────────────┘
 ```
 
 ## Directory Structure
 
 ```
 jenny-mcp-server/
-├── server.py              # Framework entry point (zero plugin knowledge)
+├── server.py              # Entry point — FastMCP server + auth middleware
+├── start.sh / stop.sh / restart.sh   # Service management scripts
 ├── requirements.txt       # Python dependencies
-├── start.sh / stop.sh / restart.sh  # Process management scripts
-│
-└── toolkits/
-    ├── __init__.py         # Exports BaseToolkit + ToolkitManager
-    ├── base.py             # Abstract base (lifecycle hooks + Lease + auto param extraction)
-    ├── manager.py          # Plugin discovery + registration + switching
-    │
-    └── plugins/            # All toolkits (auto-discovered)
-        ├── droid.py            # Droid file-pipe mode (coding agent)
-        ├── droid_config.json   # Droid private config (gitignored)
-        ├── opencode.py         # OpenCode HTTP API mode (coding agent)
-        ├── data_analysis.py    # CSV/JSON analysis + visualization
-        ├── web_enhanced.py     # JS rendering / batch fetch / search / login
-        ├── astrology.py        # Western astrology (Kerykeion)
-        ├── bazi2/              # Bazi (Four Pillars of Destiny)
-        ├── qimen2/             # Qi Men Dun Jia (Mystical Door Escaping Technique)
-        └── ziwei2/             # Zi Wei Dou Shu (Purple Star Astrology)
-
-# Auto-generated at runtime
-logs/                      # RotatingFileHandler (10MB per file, 3 backups)
+├── toolkits/
+│   ├── __init__.py        # Exports BaseToolkit, ToolkitManager
+│   ├── base.py            # BaseToolkit with Lease mechanism
+│   ├── manager.py         # Plugin discovery & dispatch
+│   └── plugins/           # All toolkits live here
+│       ├── droid.py
+│       ├── opencode.py
+│       ├── data_analysis.py
+│       ├── web_enhanced.py
+│       ├── astrology.py
+│       ├── bazi2/
+│       ├── qimen2/
+│       └── ziwei2/
+└── logs/                  # Auto-created runtime logs
 ```
 
 ## Quick Start
@@ -86,14 +96,24 @@ cd jenny-mcp-server
 # Start (auto-creates venv and installs dependencies)
 bash start.sh
 
-# Default: 0.0.0.0:31415/mcp
-# Override with environment variables:
-MCP_HOST=127.0.0.1 MCP_PORT=8080 bash start.sh
-
 # Stop / Restart
 bash stop.sh
 bash restart.sh
+
+# Default: 0.0.0.0:31415/mcp
+# Override with environment variables:
+MCP_HOST=127.0.0.1 MCP_PORT=8080 bash start.sh
 ```
+
+### Prerequisites for Web Scraping
+
+The `web_enhanced` plugin uses Playwright for JS-rendered page fetching. After the initial `pip install`, install browser binaries:
+
+```bash
+.venv/bin/playwright install chromium
+```
+
+> Without this step, the `web_enhanced` toolkit will fail with "playwright not installed". Other toolkits are unaffected.
 
 ### Environment Variables
 
@@ -101,6 +121,7 @@ bash restart.sh
 |----------|---------|-------------|
 | `MCP_HOST` | `0.0.0.0` | Server listen address |
 | `MCP_PORT` | `31415` | Server listen port |
+| `MCP_PASSWORD` | *(empty)* | Bearer token password; no auth when empty |
 | `ALLOWED_HOSTS` | `127.0.0.1:*,localhost:*` | Comma-separated allowed host patterns |
 | `DROID_BIN` | `/root/.local/bin/droid` | Droid binary path |
 | `OPENCODE_BIN` | `/root/.opencode/bin/opencode` | OpenCode binary path |
@@ -116,6 +137,93 @@ Logs are written to `logs/server.log` with automatic rotation:
 tail -f logs/server.log
 grep "\[lease\]" logs/server.log
 ```
+
+## 🔐 Password Authentication
+
+Jenny MCP Server supports optional Bearer Token authentication to protect your MCP endpoint.
+
+### How It Works
+
+- Set the `MCP_PASSWORD` environment variable before starting the server
+- When set, all requests must include `Authorization: Bearer <your-password>` header
+- When **not set** (default), the server runs with **no authentication** — fully backward compatible
+
+### Server Side
+
+```bash
+# Start with password protection
+export MCP_PASSWORD="your-secret-password"
+bash start.sh
+
+# Or inline
+MCP_PASSWORD="your-secret-password" bash start.sh
+
+# Start without authentication (default behavior)
+bash start.sh
+```
+
+### Client Side (Jenny App)
+
+When adding an MCP server in **Settings → MCP Servers**:
+
+1. Fill in the server URL (e.g. `http://192.168.1.100:31415/mcp`)
+2. Enter the same password in the **Password** field
+3. The app automatically sends `Authorization: Bearer <password>` with every request
+
+> **Note:** If the server has no password configured, leave the password field empty.
+
+### Security Notes
+
+- Password is compared using `hmac.compare_digest` (constant-time) to prevent timing attacks
+- Transported in plain text over HTTP — **use only on trusted networks** or pair with HTTPS/TLS
+- For production exposure, consider a reverse proxy (nginx/caddy) with TLS termination
+
+## 🔗 Client Configuration
+
+Below are example configurations for common MCP clients. All connect to `http://localhost:31415/mcp` (adjust host/port as needed).
+
+### Claude Desktop
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "jenny": {
+      "url": "http://localhost:31415/mcp",
+      "headers": {
+        "Authorization": "Bearer your-secret-password"
+      }
+    }
+  }
+}
+```
+
+### Cursor
+
+Add to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "jenny": {
+      "url": "http://localhost:31415/mcp",
+      "headers": {
+        "Authorization": "Bearer your-secret-password"
+      }
+    }
+  }
+}
+```
+
+### Jenny App
+
+Go to **Settings → MCP Servers → Add**:
+
+- **URL:** `http://<server-ip>:31415/mcp`
+- **Password:** `your-secret-password` (leave empty if no auth)
+
+> If the server does not use password auth, omit the `headers` / `Authorization` field entirely.
 
 ## Usage
 
@@ -137,6 +245,121 @@ toolkit_switch("qimen2")          → Switch to Qi Men Dun Jia
 toolkit_switch("ziwei2")          → Switch to Zi Wei Dou Shu
 toolkit_switch("astrology")       → Switch to Western Astrology
 ```
+
+## 📦 Plugin Toolkit Reference
+
+### 🤖 Droid — AI Coding Agent (File Pipe)
+
+Wraps [Factory Droid](https://docs.factory.ai/) CLI as MCP tools. Sessions communicate via JSONL file pipes.
+
+| Tool | Description |
+|------|-------------|
+| `start_session` | Start a Droid session (supports model, auto_level, cwd, session resume) |
+| `send_message` | Send a message to a session (async, poll for reply) |
+| `poll_output` | Get latest output from a session (supports incremental reading) |
+| `check_status` | Check session status; list all sessions if no ID given |
+| `stop_session` | Stop the specified session |
+| `exec_and_wait` | One-shot: create → send → wait → return results |
+| `interrupt_session` | Interrupt running task (SIGINT), preserving session context |
+| `get_history` | View session conversation history |
+
+**Droid Configuration** — Create `toolkits/plugins/droid_config.json` (auto-detected on startup):
+
+```json
+{
+  "model": "custom:YOUR_MODEL_HERE",
+  "auto_level": "high",
+  "reasoning_effort": "none",
+  "interaction_mode": "auto",
+  "poll_interval_seconds": 30,
+  "max_wait_minutes": 15
+}
+```
+
+> A template is available at `toolkits/plugins/droid_config.example.json`. This file is gitignored since it may contain model IDs.
+
+### 🤖 OpenCode — AI Coding Agent (HTTP API)
+
+Wraps [OpenCode](https://opencode.ai/) as MCP tools via its HTTP API.
+
+| Tool | Description |
+|------|-------------|
+| `start_session` | Create an OpenCode session (auto-starts serve process) |
+| `send_message` | Send a message to a session (async, auto-polls for result) |
+| `poll_output` | Get session message list (supports incremental reading) |
+| `check_status` | Check session or server status |
+| `stop_session` | Delete an OpenCode session |
+| `exec_and_wait` | One-shot: create → send → wait → return results |
+
+### 📊 Data Analysis — CSV & JSON
+
+Query, analyze, and visualize tabular data using Pandas + Matplotlib.
+
+| Tool | Description |
+|------|-------------|
+| `csv_info` | CSV file overview (rows, columns, types, missing values) |
+| `csv_analyze` | Statistical analysis on columns (mean, median, quantiles, distribution) |
+| `csv_query` | SQL-style filtering/sorting on CSV data |
+| `csv_chart` | Generate charts (line/bar/scatter/pie/histogram) as PNG |
+| `json_query` | Parse JSON files with path-based queries |
+
+### 🌐 Web Enhanced — Scraping & Search
+
+Web scraping with JS rendering (Playwright), batch fetching, and enhanced search.
+
+| Tool | Description |
+|------|-------------|
+| `web_fetch_js` | Fetch page with Playwright JS rendering (CSS selectors, wait, cookies) |
+| `web_batch_fetch` | Batch concurrent fetch of multiple URLs |
+| `web_search_enhanced` | Enhanced search with time range, site filter, snippet extraction |
+| `web_login` | Browser auto-login and cookie saving |
+
+### 🔮 Bazi2 — 八字排盘 (Four Pillars of Destiny)
+
+Chinese birth chart analysis with Five Elements, Da Yun, and Liu Nian.
+
+| Tool | Description |
+|------|-------------|
+| `bazi2_chart` | 八字排盘（四柱/藏干/十神/纳音/日主/命宫） |
+| `bazi2_wuxing` | 五行分析（分布/旺衰/缺补） |
+| `bazi2_dayun` | 大运排列（起运年龄/大运/流年） |
+| `bazi2_liunian` | 流年分析（当年干支与日主关系） |
+| `bazi2_liuyue` | 流月分析（当年各月干支与日主关系） |
+
+### 🔮 Qimen2 — 奇门遁甲 (Mystical Door Escaping Technique)
+
+Qi Men Dun Jia divination with multiple methods.
+
+| Tool | Description |
+|------|-------------|
+| `qimen2_pan` | 时家奇门排盘（拆补/置闰）— Nine Palaces with full info |
+| `qimen2_minute` | 刻家奇门排盘（minute precision） |
+| `qimen2_gpan` | 金函玉镜日家奇门（daily method） |
+| `qimen2_overall` | 综合运势分析 |
+
+### 🔮 Ziwei2 — 紫微斗数 (Purple Star Astrology)
+
+Zi Wei Dou Shu birth chart with palaces, Da Xian, and Liu Nian.
+
+| Tool | Description |
+|------|-------------|
+| `ziwei2_chart` | 紫微排盘（命宫身宫/十四主星/四化/亮度/五行局） |
+| `ziwei2_palace` | 宫位分析（星曜组合与三方四正） |
+| `ziwei2_daxian` | 大限排列（各步大限宫位和星曜） |
+| `ziwei2_liunian` | 流年分析（当年命宫/四化/大限） |
+| `ziwei2_liuyue` | 流月分析（当年各月命宫/四化） |
+
+### 🔮 Astrology — Western Astrology
+
+Western astrology with natal charts, horoscopes, and synastry.
+
+| Tool | Description |
+|------|-------------|
+| `natal_chart` | Birth chart: Sun/Moon/Rising signs, planets, houses, aspects |
+| `horoscope` | Daily horoscope based on current transits |
+| `synastry` | Compatibility analysis between two birth charts |
+| `retrogrades` | Planetary retrograde status for a given date |
+| `moon_phase` | Moon phase info (phase name, Moon sign, illumination) |
 
 ## Creating a Plugin
 

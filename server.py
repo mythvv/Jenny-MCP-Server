@@ -1,6 +1,8 @@
+import hmac
 import inspect
 import json
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
@@ -31,6 +33,55 @@ logging.getLogger("toolkits").setLevel(logging.DEBUG)
 log = logging.getLogger("mcp-server")
 
 mcp = FastMCP("tools", json_response=True)
+
+# ── Auth middleware ──────────────────────────────────────────────
+MCP_PASSWORD = os.environ.get("MCP_PASSWORD", "")
+log.info("auth: password %s", "enabled" if MCP_PASSWORD else "disabled")
+
+
+class _AuthHeaders:
+    """Starlette-style middleware for bearer token auth."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http",):
+            await self.app(scope, receive, send)
+            return
+
+        # No password configured → skip auth
+        if not MCP_PASSWORD:
+            await self.app(scope, receive, send)
+            return
+
+        # Extract headers from ASGI scope
+        headers = dict(scope.get("headers", []))
+        auth_header = headers.get(b"authorization", b"").decode("utf-8", errors="replace")
+
+        if not auth_header.startswith("Bearer "):
+            await _send_json(send, 401, {"error": "Unauthorized", "detail": "Missing or invalid Authorization header"})
+            return
+
+        token = auth_header[7:]
+        if not hmac.compare_digest(token, MCP_PASSWORD):
+            await _send_json(send, 403, {"error": "Forbidden", "detail": "Invalid password"})
+            return
+
+        await self.app(scope, receive, send)
+
+
+async def _send_json(send, status: int, body: dict):
+    raw = json.dumps(body).encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [
+            [b"content-type", b"application/json"],
+            [b"content-length", str(len(raw)).encode()],
+        ],
+    })
+    await send({"type": "http.response.body", "body": raw})
 
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -231,6 +282,7 @@ _signal.signal(_signal.SIGTERM, lambda *_: (_shutdown(), exit(0)))
 
 if __name__ == "__main__":
     import argparse
+    import uvicorn
 
     parser = argparse.ArgumentParser(description="Jenny MCP Server")
     parser.add_argument("--host", default="0.0.0.0")
@@ -240,4 +292,11 @@ if __name__ == "__main__":
     mcp.settings.host = args.host
     mcp.settings.port = args.port
     mcp.settings.streamable_http_path = "/mcp"
-    mcp.run(transport="streamable-http")
+
+    # Build Starlette app and mount auth middleware if password is set
+    app = mcp.streamable_http_app()
+    if MCP_PASSWORD:
+        app.add_middleware(_AuthHeaders)
+        log.info("Auth middleware mounted")
+
+    uvicorn.run(app, host=args.host, port=args.port)

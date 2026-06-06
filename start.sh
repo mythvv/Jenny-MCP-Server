@@ -28,7 +28,8 @@ LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/server.log"
 
-echo "Starting Jenny MCP Server on ${HOST}:${PORT}/mcp"
+AUTH_MODE="${MCP_PASSWORD:+password-protected}"
+echo "Starting Jenny MCP Server on ${HOST}:${PORT}/mcp ${AUTH_MODE:-no-auth}"
 nohup "$VENV/bin/python" "$SCRIPT_DIR/server.py" --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 echo "Started PID: $(cat "$PID_FILE")"

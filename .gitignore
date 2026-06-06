@@ -37,3 +37,7 @@ toolkits/plugins/droid_config.json
 *.tmp
 *.bak
 .env
+
+# Backup files (extended patterns)
+*.bak2
+*.bak*
