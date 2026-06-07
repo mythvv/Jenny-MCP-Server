@@ -218,13 +218,34 @@ def _register_single_tool(tk_name: str, tool_name: str, handler, desc: str, para
 
 @mcp.tool()
 def toolkit_list() -> str:
-    """List all available toolkits."""
+    """List all available toolkits.
+
+    Returns a JSON object with a "toolkits" key containing a list of toolkit info objects.
+    Each toolkit object includes "name", "description", and other metadata fields.
+
+    Use this to discover which toolkits are available before calling toolkit_switch.
+
+    Example response:
+        {"toolkits": [{"name": "droid", "description": "Android device control"}, ...]}
+    """
     return json.dumps({"toolkits": toolkit_manager.list_toolkits()})
 
 
 @mcp.tool()
 async def toolkit_switch(name: str, config: str = "{}", ctx: Context = CurrentContext()) -> str:
-    """Switch to a toolkit. Tool list updates automatically after switching."""
+    """Switch to a toolkit. Tool list updates automatically after switching.
+
+    Args:
+        name: The toolkit name to switch to. Use toolkit_list to see available names.
+        config: Optional JSON string for toolkit-specific configuration.
+                Default is "{}". Some toolkits require config (e.g. workspace path).
+
+    After switching, the toolkit's tools become available via exec_tool.
+    Returns JSON with "status", "to" (toolkit name), "available_tools" list,
+    and "tools_schema" describing each tool's parameters.
+
+    If the toolkit is not found, returns an "error" with "available" names.
+    """
     try:
         cfg = json.loads(config) if isinstance(config, str) else config
     except json.JSONDecodeError:
@@ -265,7 +286,14 @@ async def toolkit_switch(name: str, config: str = "{}", ctx: Context = CurrentCo
 
 @mcp.tool()
 async def toolkit_current(ctx: Context = CurrentContext()) -> str:
-    """Show the current toolkit."""
+    """Show the current active toolkit and its available tools.
+
+    Returns JSON with "current" (toolkit name or null), "toolkit" (info object),
+    and "available_tools" (list of tool names).
+
+    If no toolkit is active, "current" is null and a "hint" field suggests
+    using toolkit_switch to select one.
+    """
     current_name = await ctx.get_state("current_toolkit")
 
     if not current_name:
@@ -292,7 +320,20 @@ async def toolkit_current(ctx: Context = CurrentContext()) -> str:
 
 @mcp.tool()
 async def exec_tool(name: str, params: str = "{}", ctx: Context = CurrentContext()) -> str:
-    """Execute a tool in the current toolkit. Pass the tool name and parameters as JSON."""
+    """Execute a tool in the current toolkit. Pass the tool name and parameters as JSON string.
+
+    Args:
+        name: The tool name to execute (as returned by toolkit_switch's available_tools).
+              Both plain names ("start_session") and prefixed names ("droid__start_session")
+              are accepted.
+        params: JSON string of keyword arguments for the tool.
+                Default is "{}" (no arguments). Check tools_schema from toolkit_switch
+                for each tool's expected parameters.
+
+    A toolkit must be active (via toolkit_switch) before calling this.
+    Returns the tool's result as JSON string, or an "error" if the tool is not found
+    or no toolkit is active.
+    """
     # Find which toolkit is active for this session
     toolkit_name = await ctx.get_state("current_toolkit")
 
